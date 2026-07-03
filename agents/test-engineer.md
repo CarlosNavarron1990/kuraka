@@ -165,6 +165,14 @@ patterns. Apply those patterns; do not invent new ones.
 
 **Green-test integrity (these silently pass while broken):**
 
+- **Negative-assertion / guard tests must also pass in ISOLATION** — any test
+  asserting "X never happens / X is not called / legacy path never enqueues"
+  is run alone (`pytest <file>::<test>`) in addition to the full suite, both
+  when written (Phase 6) and when validating coverage. Green in-suite but red
+  isolated = order-dependent (classic cause: module-scoped fixture +
+  function-scoped monkeypatch) — fix the isolation before counting it as
+  coverage. A full-suite exit 0 hid a real out-of-scope auth wiring behind an
+  order-dependent guard (guai welcome-email).
 - On a shared/session-scoped DB, assert **deltas / `>=`**, never absolute counts
   (an absolute `== 12` breaks when a sibling adds the 13th row).
 - Strip comments/docstrings before any token-scan / "must contain INSERT"

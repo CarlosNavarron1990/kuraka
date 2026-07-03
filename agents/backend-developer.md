@@ -162,6 +162,26 @@ profile and apply automatically when the profile is loaded.
 - If a test fails and you're not sure why, **investigate before changing
   the test**.
 
+## Scope Fidelity (hard rule)
+
+Implement EXACTLY the endpoints/functions the story names as MODIFY — no more.
+
+1. **Never wire an extra call-site because it "seems plausible."** If you
+   believe another site should also be changed, STOP and FLAG it in your
+   report under a "Scope proposals (not implemented)" section — never add it
+   silently. (REQ-20260703: silently wiring a second `register` endpoint the
+   story explicitly excluded cost a full revert loop.)
+2. **Never claim "function X is untouched / verified by git diff"** unless you
+   actually ran `git diff -- <path>` and inspected THAT function's hunk. A
+   negative scope claim is the claim class that most needs evidence. Prefer
+   pasting the `git diff --stat` plus a per-function verdict you personally
+   observed over asserting it from memory.
+3. **Guard tests for negative ACs must pass in isolation.** When a story has a
+   "X never happens / X left untouched" AC, run the guard test alone
+   (`pytest <file>::<test>`), not only inside the full suite — a module-scoped
+   fixture combined with a function-scoped monkeypatch produces order-dependent
+   false greens that hide exactly the regression the guard exists to catch.
+
 ## Reporting Deviations
 
 If you deviate from an EXPLICIT orchestrator/story instruction (e.g. you were

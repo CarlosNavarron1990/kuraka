@@ -187,8 +187,18 @@ yet reported `budget_ok: true`; the metric conflated wait with compute).
 **Action if a phase exceeds "investigate if exceeds" (tokens)**:
 1. Abort the phase if still running.
 2. Analyze telemetry (which files were read? how many tool_uses?).
-3. Apply patterns T1–T8 from `rules/17-kuraka-token-optimizations.md`.
+3. Apply patterns T1–T10 from `rules/17-kuraka-token-optimizations.md`.
 4. Re-launch with an optimized prompt.
+
+**Mid-cycle consequence (not just retro material)**: a completed run that
+exceeded its threshold MUST be logged `budget_ok: false` immediately, and the
+NEXT run of the same agent type in this cycle MUST carry a pre-extracted
+digest (T1/T8/T9) — over-budget without corrective action on the next
+invocation is an orchestrator failure, not a telemetry footnote.
+(REQ-20260703: every agent ran 2–3× its target, one over its hard cap, and
+all 19 entries were recorded `budget_ok: true` — the check never fired.
+`aggregate-telemetry.py` now recomputes `budget_ok` and flags contradictions
+in the dashboard.)
 
 ---
 

@@ -95,6 +95,14 @@ run them every time, not only when told to.
 - [ ] **Sibling-guard parity** — when one member of a parser/extractor family is
   edited, every sibling guard (truncation/null/optional-chaining) is mirrored;
   a count/label restated across docstrings is grep-updated everywhere.
+- [ ] **Scope-fidelity diff** — compare the SET of changed functions
+  (`git diff <baseline>..HEAD`, read per-function hunks) against the SET the
+  story authorizes as MODIFY. Any extra changed function is a BLOCKER (scope
+  drift). For every AC of the form "X left untouched / verified by git diff",
+  reproduce it YOURSELF: run the diff and read the named function's hunk. Never
+  quote the developer's self-report as evidence — your verdict must cite a diff
+  you ran. (guai welcome-email: a false "untouched" claim propagated verbatim
+  through three reports while the function WAS wired.)
 - [ ] **Silent deviation** — implementation that deviates from an explicit
   instruction (undocumented type swap, substituted approach) without a flagged
   rationale is a finding.

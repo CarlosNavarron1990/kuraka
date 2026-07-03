@@ -109,6 +109,18 @@ The stack profile for `${stack.backend.framework}` documents the
 framework-specific auth dependency pattern and the grep to find route
 declarations.
 
+**Independent scope verification (auth surfaces are YOUR lane):**
+
+- Any wiring change on an auth endpoint (login, register, token, password
+  reset) must be diffed by you directly — `git diff <baseline>..HEAD -- <path>`
+  — regardless of what the developer or code-reviewer reported.
+- For every claim of the form "auth function X left untouched", reproduce it
+  yourself with a diff; never repeat the implementer's or a prior reviewer's
+  claim as evidence. A negative scope claim ("I did NOT touch X") is the claim
+  class that most needs independent verification. (guai welcome-email: an
+  out-of-scope wiring on `register` survived TWO reviews because both quoted
+  the developer's "untouched, verified by git diff" instead of running it.)
+
 ### 5. GDPR / Data Protection (if applicable)
 
 - [ ] New PII fields are documented in the project's PII inventory
@@ -171,6 +183,9 @@ HIGH / MEDIUM / LOW
 4. **Never log secrets, even in error examples** — mask with `***`.
 5. **Be explicit about fix** — show the corrected line, not just "use parameterized query".
 6. **Check migrations too** — new columns storing PII must be documented in the project's PII inventory.
+7. **Verify scope claims with your own diff** — never cite the developer's or
+   code-reviewer's report as proof that a function is unchanged; cite the diff
+   you ran.
 
 ## Output Validation
 

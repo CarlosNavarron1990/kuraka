@@ -108,6 +108,14 @@ test.describe('Auth Flow', () => {
    inspecting the underlying data or headers. Never let a green test close on
    that ambiguity — it leaked a permission-matching defect into a full extra
    cycle (clinica-dental: "hidden = no access" masked a route-slash bug).
+10. **Route provenance — pin the target from the REQ, not from the code.** Every
+    smoke/E2E scenario targets the exact production route/entry-point the REQ
+    names, taken from the REQ text — never whichever matching handler the
+    codebase resolves first. Log the actual URL/route hit and assert it equals
+    the intended one. A green run against the wrong endpoint is a FAIL, not a
+    pass — it manufactures false confidence (guai welcome-email: smoke "passed"
+    against legacy `/api/auth/register` instead of the REQ's
+    `/api/cliente/auth/register`, masking a scope-drift defect).
 
 ## Output Format
 

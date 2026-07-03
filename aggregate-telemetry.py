@@ -120,7 +120,15 @@ def render_dashboard(cycles: list[dict]) -> str:
         "over_budget": 0,
     })
 
+    # budget_ok integrity: the orchestrator self-reports budget_ok per run, but
+    # it must equal tokens-vs-hard-cap recomputed here. A recorded `true` on an
+    # over-cap run means the check never fired mid-cycle (REQ-20260703: 19/19
+    # entries said budget_ok:true while one run exceeded its hard cap and every
+    # run exceeded its target).
+    budget_ok_mismatches: list[tuple[str, str, str, int, int]] = []
+
     for cycle in cycles:
+        cycle_name = cycle.get("req_name", "(unknown)")
         for run in cycle.get("runs", []):
             agent = run.get("agent", "(unknown)")
             a = per_agent[agent]
@@ -133,6 +141,10 @@ def render_dashboard(cycles: list[dict]) -> str:
             _target, hard_cap = BUDGETS.get(agent, (None, None))
             if hard_cap and t > hard_cap:
                 a["over_budget"] += 1
+                if bool(run.get("budget_ok", False)):
+                    budget_ok_mismatches.append(
+                        (cycle_name, agent, str(run.get("mode", "")), t, hard_cap)
+                    )
 
     lines.append("")
     lines.append("## Per-agent aggregate")
@@ -172,6 +184,21 @@ def render_dashboard(cycles: list[dict]) -> str:
             lines.append(
                 f"- **{agent}** — {stats['over_budget']} of {stats['invocations']} invocations exceeded {hard_cap:,} tokens"
             )
+
+    if budget_ok_mismatches:
+        lines.append("")
+        lines.append("## ⚠️ budget_ok integrity mismatches")
+        lines.append("")
+        lines.append(
+            "Runs recorded `budget_ok: true` whose tokens exceed the agent's hard "
+            "cap — the orchestrator's mid-cycle budget check did not fire. Fix the "
+            "recording discipline (see `kuraka-policies.md` → Token Budget)."
+        )
+        lines.append("")
+        lines.append("| Cycle | Agent | Run mode | Tokens | Hard cap |")
+        lines.append("|-------|-------|----------|-------:|---------:|")
+        for cycle_name, agent, run_mode, t, cap in budget_ok_mismatches:
+            lines.append(f"| {cycle_name} | {agent} | {run_mode or '—'} | {t:,} | {cap:,} |")
 
     # --- totals ---
     total_tokens = sum(s["tokens"] for s in per_agent.values())
