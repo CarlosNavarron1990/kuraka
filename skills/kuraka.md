@@ -62,6 +62,33 @@ With that, pick a mode:
 **Default is Normal.** Justify and present the proposed pipeline to the
 user **before** invoking any agent — they approve which phases to run.
 
+### Solution outline — mandatory CONCLUSION of the pre-flow conversation
+
+The pre-flow conversation never ends with a bare "shall I start the flow?".
+It ends with a **solution outline** the user can validate for completeness —
+this is what reveals, before any agent token is spent, whether the intended
+functionality is whole or a piece is missing. Present, in this order:
+
+1. **Outcome sentence** — one sentence: "when this cycle closes, the system
+   can X when Y." This is the SAME sentence Phase 6.8 will verify at close —
+   declared up front, verified at the end. If the cycle drifts from it, the
+   drift must be user-approved, never absorbed silently.
+2. **Implementation steps** — the concrete surfaces the solution is expected
+   to touch, in execution order: endpoints/routes (REAL paths, verified in the
+   code, not guessed), services, tables/migrations, UI screens, integrations,
+   config vars. Mark each NEW or MODIFY. This set seeds the scope-fidelity
+   check (`rules/17` T9): anything an implementer later changes outside it is
+   a flag, not a silent addition.
+3. **Explicitly OUT** — what this cycle will NOT do, so the user confirms the
+   missing pieces are intentional, not forgotten.
+4. **Open questions** — anything the outline could not resolve. These feed
+   Phase 1's GATE0 as questions; they are never silently assumed.
+
+Only after the user validates (or corrects) the outline, propose the mode +
+pipeline and request approval to launch. Phase 1's REQ must not contradict
+the validated outline — if `po-analyst`'s analysis diverges, surface the
+diff at the Phase 1 gate instead of absorbing it.
+
 ---
 
 ## Phase-Agent-Skill Map (Normal mode — 8 phases)
@@ -228,6 +255,11 @@ must revert and complete 6.8 first.
    that the system can now X when Y." If you can't articulate it, the
    scope of the cycle is poorly defined and you have to go back to
    Phase 1.
+   This must be the SAME outcome sentence declared in the pre-flow
+   **solution outline** (see "Initial decision") — verify THAT sentence,
+   not a freshly invented one. If the cycle legitimately drifted (user-
+   approved deltas), verify the updated sentence and note the drift in
+   the smoke doc.
    - Examples per change type:
      - **Integration**: "incoming event → entity persisted in DB → sync
        to external service".
