@@ -47,6 +47,13 @@ The detailed loading sequence lives in
 Read the telemetry file captured during the cycle:
 `${architecture.paths.docs_process_root}/agent-telemetry/{REQ-name}-telemetry.json`
 
+**Completeness check (mandatory line in the retro):** state "telemetry
+complete" or list the debts (agent runs with `status: ok` but zero/missing
+tokens, tokens without `tool_uses`/`duration_ms`, checkpoint-completed phases
+with no entry) with a justification each. `aggregate-telemetry.py` flags the
+same debts in the dashboard — a debt you don't justify here becomes a
+standing dashboard warning.
+
 Expected shape (one entry per agent invocation, in order):
 
 ```json

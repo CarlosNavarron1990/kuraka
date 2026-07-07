@@ -220,6 +220,8 @@ After EACH gate approved by the user, write the workflow state to:
   "phases_pending": ["4b", "5", "5.5", "6", "7"],
   "started_at": "ISO 8601",
   "last_updated": "ISO 8601",
+  "baseline_red": [],
+  "baseline_green": "one line: passing state at Phase 3.9 pre-flight (counts, date)",
   "artifacts": {
     "req_path": "docs/process/REQ-...",
     "story_paths": ["docs/process/stories/..."],
@@ -306,6 +308,18 @@ so the `final-auditor` (Phase 7) can analyze consumption by agent.
 The `final-auditor` reads this JSON in Phase 7 and produces the token
 ranking in the retro. Missing telemetry degrades the retro but doesn't
 block it.
+
+**Completeness is CHECKED, not assumed** (`aggregate-telemetry.py`): an
+agent run with `status: "ok"` but zero/missing `total_tokens`, or with
+tokens but missing `tool_uses`/`duration_ms`, is flagged as **telemetry
+debt** in the dashboard; so is a checkpoint-completed phase with no
+telemetry entry (label: "orchestrator-direct or missing?"). Orchestrator-side
+entries (`"agent": "orchestrator-*"`) may legitimately log 0 tokens; a
+run cut short logs `status: "session_limit"` — both are exempt. The
+final-auditor's retro must state "telemetry complete" or list the debts
+with justification. (Motivation: 4/5 vault projects had unverifiable
+telemetry — missing cycles, 0-token entries, null durations — so the
+whole budget/optimization loop ran on unchecked data.)
 
 ---
 

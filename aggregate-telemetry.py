@@ -59,6 +59,62 @@ def find_telemetry_files(project_root: Path) -> list[Path]:
     return sorted(telemetry_dir.glob("*-telemetry.json"))
 
 
+def load_checkpoint_phases(project_root: Path) -> dict[str, list[str]]:
+    """Map req_name -> phases_completed from docs/process/checkpoints/*-state*.json."""
+    ckpt_dir = project_root / "docs" / "process" / "checkpoints"
+    result: dict[str, list[str]] = {}
+    if not ckpt_dir.is_dir():
+        return result
+    for path in sorted(ckpt_dir.glob("*-state*.json")):
+        try:
+            with path.open() as fp:
+                data = json.load(fp)
+        except (json.JSONDecodeError, OSError):
+            continue
+        req = data.get("req_name")
+        phases = data.get("phases_completed")
+        if req and isinstance(phases, list):
+            result[str(req)] = [str(p) for p in phases]
+    return result
+
+
+# Phases the orchestrator runs directly by design — a missing telemetry entry
+# for these is normal (kuraka-policies: only real Agent invocations are logged).
+ORCHESTRATOR_OWNED_PHASES = {"3.9", "6.8"}
+
+
+def compute_telemetry_debt(cycle: dict, checkpoint_phases: list[str] | None) -> list[str]:
+    """Completeness integrity (kuraka-policies → Token Telemetry): flag runs whose
+    numbers can't be trusted, and checkpoint-completed phases with no entry."""
+    debts: list[str] = []
+    seen_phases: set[str] = set()
+    for run in cycle.get("runs", []):
+        agent = str(run.get("agent", "(unknown)"))
+        phase = str(run.get("phase", "?"))
+        seen_phases.add(phase)
+        if agent.startswith("orchestrator"):
+            continue  # orchestrator-side entries legitimately log 0
+        status = str(run.get("status", "ok"))
+        if status != "ok":
+            continue  # session_limit / interrupted / error already self-describe
+        tokens = int(run.get("total_tokens", 0) or 0)
+        if tokens == 0:
+            debts.append(f"phase {phase} · {agent}: status ok but 0/missing total_tokens")
+            continue
+        if not run.get("tool_uses"):
+            debts.append(f"phase {phase} · {agent}: missing/zero tool_uses on a {tokens:,}-token run")
+        if not run.get("duration_ms"):
+            debts.append(f"phase {phase} · {agent}: missing/zero duration_ms on a {tokens:,}-token run")
+    if checkpoint_phases:
+        for phase in checkpoint_phases:
+            base = phase.split("-")[0]  # "3.9-preflight" -> "3.9"
+            if base in ORCHESTRATOR_OWNED_PHASES:
+                continue
+            if phase not in seen_phases and base not in seen_phases:
+                debts.append(f"checkpoint says phase {phase} completed but no telemetry entry exists (orchestrator-direct or missing?)")
+    return debts
+
+
 def load_cycle(path: Path) -> dict | None:
     try:
         with path.open() as fp:
@@ -68,7 +124,7 @@ def load_cycle(path: Path) -> dict | None:
         return None
 
 
-def render_dashboard(cycles: list[dict]) -> str:
+def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | None = None) -> str:
     if not cycles:
         return "# Kuraka Telemetry Dashboard\n\n(no telemetry data yet)\n"
 
@@ -185,6 +241,28 @@ def render_dashboard(cycles: list[dict]) -> str:
                 f"- **{agent}** — {stats['over_budget']} of {stats['invocations']} invocations exceeded {hard_cap:,} tokens"
             )
 
+    # --- telemetry completeness debt (kuraka-policies → "Completeness is CHECKED") ---
+    debt_rows: list[tuple[str, str]] = []
+    for cycle in cycles:
+        name = cycle.get("req_name", "(unknown)")
+        ckpt = (checkpoints or {}).get(str(name))
+        for debt in compute_telemetry_debt(cycle, ckpt):
+            debt_rows.append((str(name), debt))
+    if debt_rows:
+        lines.append("")
+        lines.append("## ⚠️ Telemetry debt (completeness)")
+        lines.append("")
+        lines.append(
+            "Runs whose numbers cannot be trusted, or checkpoint-completed phases "
+            "with no telemetry entry. The budget/optimization loop is only as good "
+            "as this data — clear or justify each debt in the cycle's retro."
+        )
+        lines.append("")
+        lines.append("| Cycle | Debt |")
+        lines.append("|-------|------|")
+        for name, debt in debt_rows:
+            lines.append(f"| {name} | {debt} |")
+
     if budget_ok_mismatches:
         lines.append("")
         lines.append("## ⚠️ budget_ok integrity mismatches")
@@ -231,7 +309,7 @@ def main() -> int:
         print("[error] all telemetry files failed to parse", file=sys.stderr)
         return 1
 
-    dashboard = render_dashboard(cycles)
+    dashboard = render_dashboard(cycles, load_checkpoint_phases(project_root))
     dashboard_path = project_root / "docs" / "process" / "agent-telemetry" / "DASHBOARD.md"
     dashboard_path.write_text(dashboard, encoding="utf-8")
     print(f"[ok] dashboard written to {dashboard_path}")

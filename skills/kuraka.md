@@ -99,6 +99,7 @@ diff at the Phase 1 gate instead of absorbing it.
 | 2. Story Refinement | `story-refiner` | `refine-stories` | User approves stories |
 | 2.5. Test Planning | `test-engineer` (mode: TEST_PLANNING) | `plan-tests` | User approves test plan |
 | 3. Architect Review | `architect-reviewer` | `review-stories` + `schema-freeze` | No BLOCKERS; schema frozen |
+| 3.9. Environment pre-flight | orchestrator (deterministic, ~0 tokens) | (see §Phase 3.9) | Stack boots; gate command runs; `baseline_red` recorded in checkpoint |
 | 4a. Backend Impl | `backend-developer` | `implement-story` | `${stack.backend.lint_cmd}` + `${stack.backend.test_cmd}` OK |
 | 4b. Frontend Impl | `frontend-developer` | `implement-story` | `${stack.frontend.lint_cmd}` + `${stack.frontend.typecheck_cmd}` + `${stack.frontend.test_cmd}` OK |
 | 5. Code Review | `code-reviewer` | `review-implementation` | No BLOCKER or IMPORTANT |
@@ -160,6 +161,38 @@ diff at the Phase 1 gate instead of absorbing it.
 - Validates stories and test plan; freezes schema before implementation.
 - Output: report with verdict + `${architecture.paths.docs_process_root}/schemas/SCHEMA-FROZEN-{ticket}.md`
 - Gate: all BLOCKERs resolved + schema frozen.
+
+### Phase 3.9 — Environment pre-flight (orchestrator, deterministic, ~0 tokens)
+
+**Runs in EVERY cycle that reaches Phase 4, in every mode.** The first time
+the real stack is exercised must NOT be during implementation — pre-existing
+breakage otherwise bills itself to the cycle, confounds gates, and gets fixed
+opportunistically in-branch (the pattern recurred in 5/5 vault projects,
+11+ cycles: missing deps, diverged test-DBs, dead lint configs, suites that
+never typechecked, pre-existing red tests making `exit 0` undefined).
+
+The ORCHESTRATOR runs these directly (no subagent, `rules/17` T9 style):
+
+1. **Boot** the dev stack (or its health probe) once, if the project has a
+   runtime component. A boot failure stops here.
+2. **Run the exact gate command that will judge Phase 4** — the same
+   `make check` / lint+typecheck+test string, unmodified — plus test
+   collection, once.
+3. **Record the baseline in the checkpoint** (`kuraka-policies.md` schema):
+   - `baseline_red`: the list of ALREADY-failing tests/checks (empty when
+     green). From here on, **"green" for every later gate means "no
+     regression vs `baseline_red` + new tests green"** — this keeps the gate
+     usable even on a repo with pre-existing red (sie DD1243: 8 pre-existing
+     red suites made a raw full-suite gate meaningless).
+   - `baseline_green`: one line describing the passing state (counts, date).
+4. **Fix or waive**: a broken boot / dead gate command (can't fail, exit 127,
+   doesn't propagate) is fixed BEFORE Phase 4, or explicitly waived by the
+   user and recorded as an accepted risk. Pre-existing red tests are NOT
+   fixed in this cycle's branch silently — they are either baseline-recorded
+   or spun into their own story with the user's approval.
+
+Gate: checkpoint contains `baseline_red` + `baseline_green`, and the gate
+command is proven able to fail (rule 17 T7).
 
 ### Phase 4 — Implementation
 
@@ -405,6 +438,7 @@ For Normal mode, add at the start of the REQ:
 - [ ] Phase 2: Story Refinement
 - [ ] Phase 2.5: Test Planning
 - [ ] Phase 3: Architect Review + Schema Freeze
+- [ ] Phase 3.9: Environment pre-flight (orchestrator — baseline_red recorded)
 - [ ] Phase 4a: Backend Implementation
 - [ ] Phase 4b: Frontend Implementation
 - [ ] Phase 5: Code Review
