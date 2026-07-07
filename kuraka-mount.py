@@ -287,6 +287,19 @@ def main() -> int:
             sync_tree(artifacts / "templates", claude / "templates")
             print("   ✓ templates/")
 
+    # record the vault baseline of what was just mounted, so override detection
+    # can tell "never touched by the project" (stale → refresh next mount) from
+    # "project-edited" (real override → preserve). Written BEFORE re-applying
+    # overrides: the manifest must hold the vault baseline, not the override.
+    try:
+        import kuraka_common as _kc
+        mounted_cats = tuple(c for c in _kc.OVERRIDE_CATEGORIES if want(c))
+        if mounted_cats:
+            n = _kc.write_mount_manifest(target, VAULT, mounted_cats)
+            print(f"   ✓ mount manifest ({n} vault baselines → .claude/{_kc.MOUNT_MANIFEST_NAME})")
+    except ImportError:
+        print("   ⚠ kuraka_common.py not found — mount manifest skipped (override detection stays legacy)")
+
     # re-apply project-specific overrides on top of the fresh copy (always)
     run_py("kuraka-restore.py", str(target), "--overrides-only")
 
@@ -300,6 +313,7 @@ def main() -> int:
         ".claude/hooks/",
         ".claude/rules/16-agent-backup.md",
         ".claude/rules/17-kuraka-token-optimizations.md",
+        ".claude/.kuraka-mount-manifest.json",
         "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
         "docs/process/agent-telemetry/*.json",
     ]

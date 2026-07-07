@@ -106,7 +106,14 @@ files directly):
 
 - **Detect** (`kuraka_common.detect_overrides`): a `.claude/{agents,skills,commands}/*.md`
   file is an override if it diverges byte-for-byte from its vault baseline (or has no
-  baseline = custom). `*.append.md` fragments are excluded.
+  baseline = custom). `*.append.md` fragments are excluded. **Staleness is NOT an
+  override**: `kuraka-mount.py` writes `.claude/.kuraka-mount-manifest.json` (vault
+  baseline hash per mounted file); a file that differs from the current vault but still
+  matches its mount-time baseline was never touched by the project — it is skipped so
+  the next mount refreshes it. Legacy projects without a manifest get a git-history
+  fallback (`_matches_vault_history`): divergent-but-matching-a-committed-vault-version
+  = stale, skipped. (Without this, a stale project pinned itself to an old framework
+  forever: kuraka-control 2026-07 had 27 June files snapshotted as "overrides".)
 - **Snapshot** (`kuraka-backup.py`, also `--overrides-only`): copies divergent files to
   `projects/<slug>/overrides/<cat>/<file>` + a `MANIFEST.md`. If nothing diverges it
   **clears** the store subdir, so a reverted tuning disappears (no orphan re-applied later).

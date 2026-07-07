@@ -19,6 +19,7 @@ Central store layout (decided 2026-06-28 — single directory per project):
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -139,9 +140,73 @@ def has_history(vault: Path, slug: str) -> bool:
 
 OVERRIDE_CATEGORIES = ("agents", "skills", "commands")
 
+MOUNT_MANIFEST_NAME = ".kuraka-mount-manifest.json"
+
 
 def _file_hash(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def load_mount_manifest(project: Path) -> dict[str, str]:
+    """Vault-baseline hashes recorded at mount time ('<cat>/<rel>' -> sha256).
+    Empty dict when the project pre-dates the manifest (legacy mounts)."""
+    p = project / ".claude" / MOUNT_MANIFEST_NAME
+    if not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    files = data.get("files", {})
+    if not isinstance(files, dict):
+        return {}
+    return {str(k): str(v) for k, v in files.items()}
+
+
+def write_mount_manifest(project: Path, vault: Path,
+                         categories: tuple[str, ...] = OVERRIDE_CATEGORIES) -> int:
+    """Record the vault-baseline hash of every mountable file in `categories`,
+    merging over any existing manifest (categories not mounted this time keep
+    their old entries). detect_overrides uses this to tell 'the project never
+    touched it' (vault staleness -> refresh on next mount) from 'the project
+    edited it' (real override -> preserve). Returns entries written."""
+    manifest = load_mount_manifest(project)
+    count = 0
+    for cat in categories:
+        src = vault / cat
+        if not src.is_dir():
+            continue
+        manifest = {k: v for k, v in manifest.items() if not k.startswith(f"{cat}/")}
+        for p in sorted(src.rglob("*.md")):
+            if p.name.endswith(".append.md"):
+                continue
+            key = (Path(cat) / p.relative_to(src)).as_posix()
+            manifest[key] = _file_hash(p)
+            count += 1
+    out = project / ".claude" / MOUNT_MANIFEST_NAME
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"files": manifest}, indent=1, sort_keys=True) + "\n",
+                   encoding="utf-8")
+    return count
+
+
+def _matches_vault_history(vault: Path, rel: str, file_hash: str) -> bool:
+    """Legacy-fallback staleness test (projects mounted before the manifest
+    existed): True if `file_hash` equals ANY committed vault version of `rel`.
+    A byte-for-byte historical match proves the project never edited the file."""
+    try:
+        commits = subprocess.run(
+            ["git", "log", "--format=%H", "--", rel],
+            capture_output=True, text=True, cwd=vault, check=False,
+        ).stdout.split()
+    except OSError:
+        return False
+    for c in commits:
+        r = subprocess.run(["git", "show", f"{c}:{rel}"],
+                           capture_output=True, cwd=vault, check=False)
+        if r.returncode == 0 and hashlib.sha256(r.stdout).hexdigest() == file_hash:
+            return True
+    return False
 
 
 def detect_overrides(project: Path, vault: Path) -> list[Path]:
@@ -149,12 +214,21 @@ def detect_overrides(project: Path, vault: Path) -> list[Path]:
     from the vault baseline, or that don't exist in the vault at all (custom
     files). These are the project-specific tunings worth preserving.
 
+    A file that differs from the CURRENT vault but still matches the baseline
+    recorded in the mount manifest was never touched by the project — that is
+    vault staleness, NOT a tuning, and it is skipped so the next mount can
+    refresh it. (kuraka-control 2026-07: 27 stale files were snapshotted as
+    "overrides" and would have pinned the project to a June framework forever.)
+    Legacy projects without a manifest keep the old behavior (divergence =
+    override) until their first manifest-writing mount.
+
     Excludes *.append.md (project-layer rule fragments — never framework files,
     already excluded by the mount rsync). Vault and project both store backticked
     cross-refs (no wikilink conversion in mount-kuraka.sh), so a byte comparison
     is exact — no false positives from formatting differences.
     """
     out: list[Path] = []
+    manifest = load_mount_manifest(project)
     for cat in OVERRIDE_CATEGORIES:
         proj_cat = project / ".claude" / cat
         vault_cat = vault / cat
@@ -165,8 +239,16 @@ def detect_overrides(project: Path, vault: Path) -> list[Path]:
                 continue
             rel = p.relative_to(proj_cat)
             base = vault_cat / rel
-            if not base.exists() or _file_hash(p) != _file_hash(base):
-                out.append(Path(cat) / rel)
+            proj_hash = _file_hash(p)
+            if base.exists() and proj_hash == _file_hash(base):
+                continue  # identical to the current vault — nothing to preserve
+            key = (Path(cat) / rel).as_posix()
+            if key in manifest and proj_hash == manifest[key]:
+                continue  # untouched since mount — vault staleness, not a tuning
+            if key not in manifest and base.exists() \
+                    and _matches_vault_history(vault, key, proj_hash):
+                continue  # legacy mount, matches a committed vault version — stale
+            out.append(Path(cat) / rel)
     return out
 
 
