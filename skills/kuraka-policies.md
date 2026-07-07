@@ -167,7 +167,7 @@ Nominal budget per phase to detect deviations:
 | 1 PO Analysis | 80–120K | 200K |
 | 2 Story Refinement | 60–100K | 180K |
 | 2.5 Test Planning | 60–100K | 150K |
-| 3 Architect Review | 50–80K | 150K |
+| 3 Architect Review | 80–120K | 180K |
 | 4a Backend Impl (per story M) | 100–200K | 400K |
 | 4b Frontend Impl (per story M) | 100–200K | 400K |
 | 5 Code Review | 70–120K | 200K |
@@ -175,7 +175,7 @@ Nominal budget per phase to detect deviations:
 | 6 Tests (per story M) | 80–150K | 300K |
 | 6.5 E2E | 50–100K | 200K |
 | 6.7 Deployment | 30–60K | 120K |
-| 7 Final Audit | 40–80K | 150K |
+| 7 Final Audit | 60–100K | 150K |
 
 These thresholds are **tokens (model compute)** — the only real spend signal.
 **Wall-clock `duration_ms` is NOT a budget gate**: it includes tool/DB/container

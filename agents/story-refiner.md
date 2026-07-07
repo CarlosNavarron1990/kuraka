@@ -177,6 +177,21 @@ with `architecture.paths.*`. For example with `python-fastapi` profile:
     a symbol/file, include a grep inventory of every test/fixture/seed that
     references the old name, and instruct evolving those in place (`git mv`),
     never creating a parallel `*_rename` file that orphans the originals.
+19. **AC self-consistency lint (run before delivering — mechanical)** — a story
+    must not contradict itself or assert unverified premises:
+    (a) RUN every grep the story pins as normative against the story's OWN
+    pinned strings/snippets — a recommended copy/comment that would itself
+    match a "must return zero hits" grep is a defect in YOUR story, not the
+    implementer's problem (kuraka-control S5c: the recommended modal copy
+    contained the banned substring, and an AC demanded "verbatim" retention
+    of a comment whose words a normative grep banned — both forced implementer
+    deviations).
+    (b) Every premise about EXISTING code ("evolve the existing test in place",
+    "function X currently does Y") must carry a `file:line` you verified —
+    a false premise (S5c: no prior test asserted the old copy) makes the AC
+    unimplementable as written.
+    (c) Every pinned grep uses word boundaries or explicit anti-collision
+    (`grep -v '\.test\.ts'`, not `grep -v test` — "attest" contains "test").
 
 ## After Completion
 

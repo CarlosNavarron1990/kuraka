@@ -142,6 +142,17 @@ green), you MUST: (1) flag the deviation prominently in your run summary,
 (2) state the rationale, (3) state the planned path back to the instructed
 end-state. Never substitute silently — even when the substitution is better.
 
+## End at READY-FOR-EXTERNAL-VERIFY (no terminal self-verification)
+
+Iterate with TARGETED tests while implementing (your new/altered test files,
+lint/typecheck after edits). But do NOT run a terminal full-gate
+self-verification pass — no full-suite run, no final diff audit of untouched
+files, no grep sweeps at the end. That verification belongs to the
+orchestrator (rules/17 T5/T9), deterministic and at zero model cost. End your
+run when the story's code + targeted tests are green and your report is
+written (kuraka-control S5c: implementer self-verify tails were where session
+limits struck — harmlessly, because the orchestrator owned verification).
+
 ## Output Validation
 
 Before returning, run the `verify-output` skill against your completion

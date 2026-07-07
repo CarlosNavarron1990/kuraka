@@ -39,14 +39,14 @@ BUDGETS = {
     "po-analyst": (80_000, 200_000),
     "story-refiner": (60_000, 180_000),
     "test-engineer": (60_000, 300_000),  # covers both TEST_PLANNING and TEST_WRITING
-    "architect-reviewer": (50_000, 150_000),
+    "architect-reviewer": (100_000, 180_000),  # raised 2026-07-07: empirical freeze (execute-the-mechanism) is worth the spend
     "backend-developer": (100_000, 400_000),
     "frontend-developer": (100_000, 400_000),
     "code-reviewer": (70_000, 200_000),
     "security-reviewer": (60_000, 180_000),
     "e2e-tester": (50_000, 200_000),
     "deployment-verifier": (30_000, 120_000),
-    "final-auditor": (40_000, 150_000),
+    "final-auditor": (70_000, 150_000),  # raised 2026-07-07: prior-retro evidence checks justify the floor
     "migration-reviewer": (20_000, 80_000),
     "pattern-detector": (30_000, 100_000),
 }

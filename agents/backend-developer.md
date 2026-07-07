@@ -182,6 +182,19 @@ Implement EXACTLY the endpoints/functions the story names as MODIFY — no more.
    fixture combined with a function-scoped monkeypatch produces order-dependent
    false greens that hide exactly the regression the guard exists to catch.
 
+## End at READY-FOR-EXTERNAL-VERIFY (no terminal self-verification)
+
+Iterate with TARGETED tests while implementing (your new/altered test files,
+lint after import edits). But do NOT run a terminal full-gate self-verification
+pass — no full-suite run, no final `git diff` audit of untouched files, no
+isolation replays, no md5/grep sweeps at the end. That verification belongs to
+the orchestrator (rules/17 T5/T9), which runs it deterministically at zero
+model cost. End your run when the story's code + targeted tests are green and
+your report is written. Rationale: the self-verify tail duplicates orchestrator
+work AND is where long runs get cut by session limits (kuraka-control S5c:
+both implementer runs were truncated exactly there — harmlessly, because the
+orchestrator owned the verification).
+
 ## Reporting Deviations
 
 If you deviate from an EXPLICIT orchestrator/story instruction (e.g. you were

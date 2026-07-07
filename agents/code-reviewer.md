@@ -161,6 +161,10 @@ HIGH / MEDIUM / LOW
   are Phase 6's job, or work an architect-approved exception clause covers). Do
   NOT inflate these to BLOCKER — flagging Phase-6 tests as BLOCKER in Phase 5 is
   severity inflation (guai stripe-webhooks). List them, don't gate on them.
+  This holds even when a story AC names the artifact: check the pipeline plan
+  for the owning phase BEFORE assigning severity — a missing smoke doc that
+  Phase 6.8 produces is DEFERRED, not IMPORTANT (kuraka-control S5c: the
+  orchestrator had to re-adjudicate exactly this).
 - **MINOR** — Can fix later. Style preference, documentation gap.
 - **INFO / SUGGESTION** — Optional improvement, opens discussion.
 - **PRAISE** — Highlight good decisions (important for team morale).

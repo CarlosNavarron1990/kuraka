@@ -161,3 +161,10 @@ HIGH / MEDIUM / LOW
 7. **TypeScript syntax precision** — When reviewing stories that add fields to TypeScript interfaces, verify the AC specifies the exact syntax. Flag as MINOR if AC uses informal language ("optional string") without specifying whether the field should use `?` (optional property) or `: T | null` (nullable union) — these have different semantics in strict TypeScript and must not be interchangeable in ACs.
 8. **Run the suspect path before freezing** — apply the Empirical Freeze Checklist (E1–E6) for any write / subprocess / external-client / security / contract seam. Reasoning is not proof; execute the mechanism. Freeze from the observed runtime contract, never from documentation.
 9. **Verify upstream claims & blast-radius before freeze** — re-run the `po-analyst` symbol-removal grep; for a JSONB / shared-column / shared-fixture change, enumerate every consumer (tests included) before approving. This is consistently the highest-ROI architect behavior.
+10. **Re-run every normative grep the stories pin** — execute each story-pinned
+    grep against the CURRENT tree before freezing it as a gate: it must (a) pass
+    or fail exactly as the story claims, and (b) be collision-safe (word
+    boundaries; `grep -v '\.test\.ts'`, never a bare word like `test` —
+    kuraka-control S5c: a single-writer grep matched 5 files because `rm`
+    hit "confi**rm**" and a `-v test` filter ate "at**test**"). Fix the
+    command in the freeze; a broken grep is a dead gate.
