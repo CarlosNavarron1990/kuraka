@@ -190,10 +190,25 @@ def write_mount_manifest(project: Path, vault: Path,
     return count
 
 
-def _matches_vault_history(vault: Path, rel: str, file_hash: str) -> bool:
+_WIKILINK_RE = re.compile(rb"\[\[([^\]|]+)\]\]")
+
+
+def _normalize_legacy_format(data: bytes) -> bytes:
+    """Collapse the legacy mount-time formatting drift: old mounts converted
+    vault wikilinks ([[name]]) to runtime backticks (`name`) while copying, so
+    a project file can differ from every committed vault version by formatting
+    alone. Applying the same conversion to BOTH sides before hashing removes
+    that confound without hiding real content edits."""
+    return _WIKILINK_RE.sub(rb"`\1`", data)
+
+
+def _matches_vault_history(vault: Path, rel: str, file_hash: str,
+                           norm_hash: str | None = None) -> bool:
     """Legacy-fallback staleness test (projects mounted before the manifest
-    existed): True if `file_hash` equals ANY committed vault version of `rel`.
-    A byte-for-byte historical match proves the project never edited the file."""
+    existed): True if `file_hash` equals ANY committed vault version of `rel`,
+    byte-for-byte or after legacy wikilink normalization on both sides (old
+    mounts rewrote [[x]] -> `x` while copying, e.g. guai's review-migrations.md
+    2026-07). A historical match proves the project never edited the file."""
     try:
         commits = subprocess.run(
             ["git", "log", "--format=%H", "--", rel],
@@ -204,7 +219,12 @@ def _matches_vault_history(vault: Path, rel: str, file_hash: str) -> bool:
     for c in commits:
         r = subprocess.run(["git", "show", f"{c}:{rel}"],
                            capture_output=True, cwd=vault, check=False)
-        if r.returncode == 0 and hashlib.sha256(r.stdout).hexdigest() == file_hash:
+        if r.returncode != 0:
+            continue
+        if hashlib.sha256(r.stdout).hexdigest() == file_hash:
+            return True
+        if norm_hash is not None and hashlib.sha256(
+                _normalize_legacy_format(r.stdout)).hexdigest() == norm_hash:
             return True
     return False
 
@@ -245,9 +265,12 @@ def detect_overrides(project: Path, vault: Path) -> list[Path]:
             key = (Path(cat) / rel).as_posix()
             if key in manifest and proj_hash == manifest[key]:
                 continue  # untouched since mount — vault staleness, not a tuning
-            if key not in manifest and base.exists() \
-                    and _matches_vault_history(vault, key, proj_hash):
-                continue  # legacy mount, matches a committed vault version — stale
+            if key not in manifest and base.exists():
+                norm_hash = hashlib.sha256(
+                    _normalize_legacy_format(p.read_bytes())).hexdigest()
+                if _matches_vault_history(vault, key, proj_hash, norm_hash):
+                    continue  # legacy mount matching a committed vault version
+                    #           (raw or wikilink-normalized) — stale, not a tuning
             out.append(Path(cat) / rel)
     return out
 
