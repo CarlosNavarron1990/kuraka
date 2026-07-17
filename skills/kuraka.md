@@ -108,7 +108,7 @@ diff at the Phase 1 gate instead of absorbing it.
 | 6.5. E2E | `e2e-tester` | `generate-e2e-tests` | Playwright passes |
 | 6.7. Deployment | `deployment-verifier` | `verify-deployment` | Docker / env / nginx / CI valid |
 | 6.8. Smoke test runtime | orchestrator (with user approval) | (custom per cycle) | Smoke doc created or skip justified |
-| 7. Final Audit | `final-auditor` | `run-audit` | Retro created |
+| 7. Final Audit | `final-auditor` | `run-audit` | Retro created **AND** vault backup done (exit 0) |
 
 ### Conditional agents
 
@@ -370,6 +370,16 @@ metrics.
   - Findings per agent + concrete prompt patches OR project-layer additions.
   - Systemic issues + improvements.
   - Token / latency telemetry.
+- **MANDATORY last step — vault backup (never skip):** after the RETRO is
+  written, snapshot the project's full Kuraka state into the central vault store:
+  ```bash
+  python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-backup.py" <project-root>
+  ```
+  This is a hard exit criterion: Phase 7 is NOT complete until this command
+  exits 0. It (1) feeds `pattern-detector` across all projects and (2) preserves
+  the cycle outside the solution's git so a branch switch can't lose it
+  (`kuraka-restore.py` pastes it back on the next mount). If it is skipped for
+  any reason, the cycle stays OPEN — do not report Phase 7 as done.
 
 ---
 
@@ -447,7 +457,8 @@ For Normal mode, add at the start of the REQ:
 - [ ] Phase 6.5: E2E Tests
 - [ ] Phase 6.7: Deployment Verification
 - [ ] Phase 6.8: Smoke test runtime (MANDATORY — skip only with explicit justification)
-- [ ] Phase 7: Final Audit
+- [ ] Phase 7: Final Audit (RETRO created)
+- [ ] Phase 7: Vault backup — `kuraka-backup.py` exited 0 (MANDATORY — closes the cycle)
 ```
 
 For Lite / Retroactive / Reduced-by-risk modes, see the templates in

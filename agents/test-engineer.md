@@ -181,6 +181,26 @@ patterns. Apply those patterns; do not invent new ones.
   "green" actually exercises the new write behavior (don't defer it all to Phase 6).
 - Any seed-edge / enum change ships a real-seeded integration test (no mocks) —
   mocked-transition units can't catch a missing/mis-cased seed edge.
+- **Browser-runner gate integrity** — run the test command WITHOUT a pipe, assert
+  exit 0 AND absence of "FAILED", AND confirm the runner executed the FULL count
+  (e.g. `Executed N of N (SUCCESS)`). A browser DISCONNECT mid-run yields a PARTIAL
+  tally (e.g. `123 of 230`) that is NOT a pass; re-run to completion after fixing
+  whatever floods the browser (see LL-019).
+- **Test-vs-code reconciliation** — when a failing test encodes a KNOWN-bug premise
+  the code has since fixed on PURPOSE (confirm via comment/story/commit), UPDATE the
+  test to the fixed contract (rename the `describe`, flip the assertion) — never
+  weaken the code back to satisfy a stale test (LL-019 §1).
+- **Decimals often serialize as strings** ("5.00") — compare with `Number()`, never
+  `.toBe(rawString)`.
+
+**Component-test mechanics live in the STACK PROFILE.** Framework-specific gotchas that
+pass the build and fail only under the test runner — which date/locale adapter the spec
+must provide, i18n-directive stubs, aria/template forms that throw only in JIT, guard
+resets between synthetic submits — are documented in
+`.claude/stack-profiles/${stack.frontend.framework}.md` (and the backend profile for
+`${stack.backend.framework}`) under "Test patterns". **Load the profile before writing
+component tests**; if a gotcha you hit isn't there, propose adding it rather than
+re-deriving it per spec.
 
 **DON'T test:**
 

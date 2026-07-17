@@ -50,6 +50,8 @@ AGENTS=(
   deployment-verifier
   final-auditor
   pattern-detector
+  deploy-diagnostician
+  provider-contract-validator
 )
 
 SKILLS=(
@@ -75,6 +77,7 @@ SKILLS=(
   detect-patterns
   compact-context
   workflow
+  diagnose-deploy
 )
 
 # ---------------------------------------------------------------------------

@@ -66,6 +66,55 @@ Relative to `architecture.paths.frontend_root` unless
 - **E2E**: Playwright (see `e2e-tester`) — full-page snapshots for modal/overlay state.
 - **Naming**: `should {action} when {condition}`.
 
+### Unit-test gotchas (TestBed/JIT — invisible to `ng build`)
+
+These pass an AOT build and fail only in the headless browser. Apply when the component
+under test renders Material or i18n:
+
+- **The spec's `DateAdapter` MUST match the app's.** If the app provides
+  `provideLuxonDateAdapter()` and forms bind Luxon `DateTime`, the spec must provide the
+  **same Luxon adapter**. `provideNativeDateAdapter()` treats a `DateTime` as an invalid
+  `Date` → the datepicker validator silently invalidates the form → the submit handler
+  no-ops → `dialogRef.close` is never called, and the happy-path assertion fails for the
+  wrong reason.
+- **`*transloco` calls `_loadDependencies()`** — the `TranslocoService` stub MUST implement
+  `_loadDependencies: () => of([])`, or an uncaught error floods change detection and
+  **DISCONNECTS** the browser mid-run (a partial run then reads as a failure tally).
+- **Dynamic aria must be `[attr.aria-label]="expr"`**, never `aria-label="{{ expr }}"` —
+  the interpolated form throws **NG0303** in JIT tests even though AOT tolerates it. Fix
+  the template, not the test.
+- **Reset the double-submit guard** (`loading`/`submitting` signal — see invariants)
+  between two synthetic `onSubmit()`/`guardar()` calls on the same instance, or the 2nd
+  is short-circuited and the test asserts against a no-op.
+- **Karma gate**: run the test command WITHOUT a pipe; require exit 0, the absence of
+  "FAILED", **and** `Executed N of N (SUCCESS)` — a mid-run DISCONNECT yields a partial
+  tally that is not a pass.
+
+### E2E mechanics (Playwright + Angular Material)
+
+The universal E2E patterns (auth, CRUD recipes, golden-path, teardown) live in the
+`e2e-tester` agent. These are the **Angular/Material-specific mechanics** it needs here:
+
+- **Form selectors**: prefer `[formcontrolname="x"]` for inputs and
+  `mat-select[formcontrolname="x"]` for selects — stable across i18n copy changes
+  (`getByLabel` couples the test to the Transloco string). Dialogs: `getByRole('dialog')`.
+- **`mat-select` cannot be `.fill()`ed or `selectOption()`ed** — open the panel (click the
+  `mat-select`) and click a `mat-option` inside `.cdk-overlay-container`.
+- **Datepicker**: the input renders `MAT_DATE_FORMATS.display.dateInput` under
+  `MAT_DATE_LOCALE` (e.g. `es-PE` → `dd/MM/yyyy`) while the API carries ISO
+  `yyyy-MM-dd` — **convert before asserting**; never compare raw ISO to the rendered
+  value. The input is typically **`readonly`** (edited via the calendar popup), so
+  `.fill()` throws "not editable" → treat it **observe-only** unless the value must
+  change, then drive the calendar.
+- **`*appCanAccess` (and any structural permission directive) REMOVES the element** — a
+  hidden control is **absent** (`count() === 0`), not CSS-hidden. Detect gating by
+  presence/count, never by `toBeVisible()`.
+- **Material paginator** buttons are **disabled at the boundaries** — guard with
+  `isEnabled()` before clicking (Playwright waits for actionability → a disabled "first
+  page" hangs to timeout).
+- **Overlays/modals**: snapshot the **full page**, not a subtree — a sibling open dialog
+  is invisible to a subtree snapshot and fabricates phantom anomalies.
+
 ## Naming and typing conventions
 
 - Interfaces are `PascalCase`, no `I` prefix.

@@ -99,6 +99,23 @@ function makeMockEntity(overrides: Partial<Entity> = {}): Entity {
 
 For more framework-specific examples, consult the stack profile.
 
+### 7b. Runner-only gotchas — load the STACK PROFILE first
+
+A green build is NOT a green test run: every stack has gotchas that pass compilation and
+fail only under the test runner (the date/locale adapter the spec must provide, i18n
+directive stubs, template forms that throw only in JIT, guard resets between synthetic
+submits). **These are framework-specific and live in
+`.claude/stack-profiles/${stack.frontend.framework}.md` (or the backend profile) under
+"Test patterns" — read it before writing component tests.** If you hit a gotcha that
+isn't documented there, propose adding it to the profile instead of re-deriving it in
+each spec.
+
+Universal (any stack):
+1. **Decimals often serialize as strings** → compare with `Number()`, never `.toBe(str)`.
+2. **Test-vs-code reconciliation:** if a failing test encodes a KNOWN-bug premise the code
+   has since fixed on purpose (confirm via comment/story/commit), UPDATE the test to the
+   fixed contract — never weaken the code to satisfy a stale test (LL-019).
+
 ### 8. After writing
 
 1. Run `${stack.backend.lint_cmd}` (or frontend equivalent) on the test
@@ -106,3 +123,7 @@ For more framework-specific examples, consult the stack profile.
 2. Run the new test alone using the framework's idiom (e.g.,
    `pytest path/to/test_file.py -v`, `vitest run path/to/file.spec.ts`).
 3. Run `${stack.backend.test_cmd}` to verify the full suite still passes.
+   **Gate integrity:** run WITHOUT a pipe; assert exit 0 AND absence of "FAILED" AND
+   that the runner executed the FULL count (browser runners: `Executed N of N
+   (SUCCESS)`) — a DISCONNECT mid-run gives a PARTIAL tally that is not a pass;
+   re-run to completion (LL-019).
