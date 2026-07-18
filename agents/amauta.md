@@ -205,7 +205,7 @@ docs/
     ├── stories/
     ├── test-plans/
     ├── schemas/
-    ├── retrospectives/
+    ├── agent-retrospectives/
     └── agent-telemetry/
 ```
 
