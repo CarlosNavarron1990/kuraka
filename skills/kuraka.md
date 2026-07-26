@@ -60,7 +60,9 @@ With that, pick a mode:
 | **Retroactive** | 4 | Code already implemented without workflow (anti-pattern, avoid it) |
 
 **Default is Normal.** Justify and present the proposed pipeline to the
-user **before** invoking any agent — they approve which phases to run.
+user **before** invoking any agent — they approve which phases to run. The
+presentation is a markdown table (format mandated in §"Solution outline"
+below), never a per-phase block list.
 
 ### Solution outline — mandatory CONCLUSION of the pre-flow conversation
 
@@ -88,6 +90,30 @@ Only after the user validates (or corrects) the outline, propose the mode +
 pipeline and request approval to launch. Phase 1's REQ must not contradict
 the validated outline — if `po-analyst`'s analysis diverges, surface the
 diff at the Phase 1 gate instead of absorbing it.
+
+**Present the proposed pipeline as a MARKDOWN TABLE — never a per-phase
+block list.** One row per phase (or per collapsed group), columns exactly:
+`Fase | Agente | Skill | ¿Corre? | Justificación`. `¿Corre?` is one of
+`Sí` / `Colapsada` / `Omitida`. Group every omitted phase into a SINGLE row
+with its shared reason — do not spend one block per skipped phase. The table
+is the readable, scannable form the user approves from; a flat list of
+`Fase:` / `Agente:` / `Justificación:` lines separated by rules is a
+presentation defect. Skeleton (fill from the actual decision):
+
+| Fase | Agente | Skill | ¿Corre? | Justificación |
+|------|--------|-------|:-------:|---------------|
+| 1 PO Analysis | `po-analyst` | `analyze-requirement` | Sí | … |
+| 2 Story Refinement | `story-refiner` | `refine-stories` | Sí | … |
+| 3 Architect Review | `architect-reviewer` | `review-stories`+`schema-freeze` | Sí | Obligatoria: auth |
+| 4a Backend | `backend-developer` | `implement-story` | Sí | El fix |
+| 5 + 5.5 | `code-reviewer` + `security-reviewer` | `review-implementation` + `security-audit` | Sí | Obligatorias: auth |
+| 6.8 Smoke | orquestador | (custom) | Sí | Gate que el REQ anterior dejó abierto |
+| 7 Final Audit | `final-auditor` | `run-audit` | Sí | RETRO |
+| 2.5, 6, 6.5, 6.7 | — | — | Omitida | Sin suite de tests / Playwright / Docker en el repo |
+
+End with the launch question below the table (e.g. "¿Arranco con la
+fase X?"). The mode line (Normal/Reduced/Lite + why) goes ABOVE the table,
+one sentence — not folded into a phase row.
 
 ---
 
