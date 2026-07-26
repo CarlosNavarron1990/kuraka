@@ -101,10 +101,8 @@ def cmd_mount(args: list[str]) -> int:
         tgt = {"2": "codex", "3": "cursor", "4": "antigravity"}.get(e, "claude")
         print("")
 
-    if tgt == "claude":
-        return py("kuraka-mount.py", str(target))
-    if tgt in TARGETS:
-        return py("kuraka-export.py", str(target), "--target", tgt)
+    if tgt in ("claude", "antigravity", "codex", "cursor"):
+        return py("kuraka-mount.py", str(target), "--target", tgt)
     err(f"❌ target desconocido: {tgt}  (claude | codex | cursor | antigravity)")
     return 1
 

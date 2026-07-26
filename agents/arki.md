@@ -127,7 +127,8 @@ docs/arquitectura/
 ├── README.md                           # Index
 ├── stack-decision.md                   # ADR: why this stack (cite discovery)
 ├── layers.md                           # Layer pattern for chosen framework
-├── domain-model.md                     # ER draft from requirements entities
+├── domain-model.md                     # ER draft + state machine (formalized from inti's flujos)
+├── flujos/                             # UML sequence diagrams + casuística (edge-case matrix), formalized from inti's discovery-level flujos
 ├── integrations-overview.md            # Each integration + direction + protocol
 ├── multitenant.md                      # Only if multi-tenant
 ├── security-model.md                   # Auth + data classification + key management
@@ -145,8 +146,10 @@ seed:
 .claude/project/
 ├── README.md                          # Explains the layer + how the team maintains it
 ├── conventions/
+│   ├── api-design.md                  # API golden rules: endpoint naming, error envelope, pagination, versioning, auth header, status codes
+│   ├── query-and-repository.md        # Query/repository patterns: RLS enforcement, N+1 avoidance, transaction & idempotency rules
 │   ├── tenant-isolation.md            # Only if conventions.multi_tenant: true (seed from template)
-│   └── (other team-specific conventions added by the team over time)
+│   └── (domain-specific conventions seeded from discovery: e.g. money-and-ledger, pii-anonymization, naming)
 ├── review-checks/                     # Empty initially; populated as the team accumulates checks
 ├── lessons-learned/
 │   ├── INDEX.md                       # Empty index; populated as retros generate lessons
@@ -163,6 +166,25 @@ that compile/run empty.
 
 Adapt the skeleton to whatever stack was chosen. Do **not** write
 business logic — just bootstrap.
+
+### Step 7.5 — Frontend prototyping (offer it, don't force it)
+
+For projects with a real UI, **offer to prototype** before the first cycle — a
+visual prototype de-risks the frontend stories and surfaces missing screens/states
+cheaply. When the user accepts:
+
+- Use the **design tokens** you just generated (brand palette, spacing, radius) so
+  the prototype and the code share one system.
+- Prototype the **hero flow per user type** (one lane per actor, ordered by flow),
+  the **registration/onboarding**, the **detail windows**, and the **system states**
+  the Web App guidance requires (loading/empty/error/success/permission) — for both
+  web and mobile if the stack has both.
+- Use the **state machine** and the **UML flujos** as the reference for what each
+  screen must show (statuses, transitions, guards).
+- Produce a **design brief** (from `templates/design-brief.template.md`) and, if a
+  design tool is available (e.g. Pencil), the actual mockups; otherwise HTML mocks.
+
+The prototype is an **input to the frontend stories**, not a substitute for them.
 
 ### Step 8 — Generate project root files
 

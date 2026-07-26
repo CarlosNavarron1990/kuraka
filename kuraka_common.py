@@ -147,10 +147,22 @@ def _file_hash(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
-def load_mount_manifest(project: Path) -> dict[str, str]:
+def platform_dirs(project: Path) -> list[Path]:
+    """Return all active platform customization roots present in the project."""
+    dirs = []
+    for d in (project / ".agents", project / ".claude"):
+        if d.is_dir():
+            dirs.append(d)
+    return dirs or [project / ".claude"]
+
+
+def load_mount_manifest(project: Path, platform: str = "claude") -> dict[str, str]:
     """Vault-baseline hashes recorded at mount time ('<cat>/<rel>' -> sha256).
     Empty dict when the project pre-dates the manifest (legacy mounts)."""
-    p = project / ".claude" / MOUNT_MANIFEST_NAME
+    p_name = f".{platform}" if not platform.startswith(".") else platform
+    p = project / p_name / MOUNT_MANIFEST_NAME
+    if not p.is_file() and p_name != ".claude":
+        p = project / ".claude" / MOUNT_MANIFEST_NAME
     if not p.is_file():
         return {}
     try:
@@ -164,13 +176,14 @@ def load_mount_manifest(project: Path) -> dict[str, str]:
 
 
 def write_mount_manifest(project: Path, vault: Path,
-                         categories: tuple[str, ...] = OVERRIDE_CATEGORIES) -> int:
+                         categories: tuple[str, ...] = OVERRIDE_CATEGORIES,
+                         platform: str = "claude") -> int:
     """Record the vault-baseline hash of every mountable file in `categories`,
     merging over any existing manifest (categories not mounted this time keep
     their old entries). detect_overrides uses this to tell 'the project never
     touched it' (vault staleness -> refresh on next mount) from 'the project
     edited it' (real override -> preserve). Returns entries written."""
-    manifest = load_mount_manifest(project)
+    manifest = load_mount_manifest(project, platform)
     count = 0
     for cat in categories:
         src = vault / cat
@@ -183,7 +196,8 @@ def write_mount_manifest(project: Path, vault: Path,
             key = (Path(cat) / p.relative_to(src)).as_posix()
             manifest[key] = _file_hash(p)
             count += 1
-    out = project / ".claude" / MOUNT_MANIFEST_NAME
+    p_name = f".{platform}" if not platform.startswith(".") else platform
+    out = project / p_name / MOUNT_MANIFEST_NAME
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"files": manifest}, indent=1, sort_keys=True) + "\n",
                    encoding="utf-8")
@@ -229,28 +243,15 @@ def _matches_vault_history(vault: Path, rel: str, file_hash: str,
     return False
 
 
-def detect_overrides(project: Path, vault: Path) -> list[Path]:
-    """Relative paths (as `<cat>/<rel>`) under .claude/<cat>/ whose content differs
+def detect_overrides(project: Path, vault: Path, platform: str = "claude") -> list[Path]:
+    """Relative paths (as `<cat>/<rel>`) under platform/<cat>/ whose content differs
     from the vault baseline, or that don't exist in the vault at all (custom
-    files). These are the project-specific tunings worth preserving.
-
-    A file that differs from the CURRENT vault but still matches the baseline
-    recorded in the mount manifest was never touched by the project — that is
-    vault staleness, NOT a tuning, and it is skipped so the next mount can
-    refresh it. (kuraka-control 2026-07: 27 stale files were snapshotted as
-    "overrides" and would have pinned the project to a June framework forever.)
-    Legacy projects without a manifest keep the old behavior (divergence =
-    override) until their first manifest-writing mount.
-
-    Excludes *.append.md (project-layer rule fragments — never framework files,
-    already excluded by the mount rsync). Vault and project both store backticked
-    cross-refs (no wikilink conversion in mount-kuraka.sh), so a byte comparison
-    is exact — no false positives from formatting differences.
-    """
+    files). These are the project-specific tunings worth preserving."""
     out: list[Path] = []
-    manifest = load_mount_manifest(project)
+    manifest = load_mount_manifest(project, platform)
+    p_name = f".{platform}" if not platform.startswith(".") else platform
     for cat in OVERRIDE_CATEGORIES:
-        proj_cat = project / ".claude" / cat
+        proj_cat = project / p_name / cat
         vault_cat = vault / cat
         if not proj_cat.is_dir():
             continue
@@ -261,33 +262,31 @@ def detect_overrides(project: Path, vault: Path) -> list[Path]:
             base = vault_cat / rel
             proj_hash = _file_hash(p)
             if base.exists() and proj_hash == _file_hash(base):
-                continue  # identical to the current vault — nothing to preserve
+                continue  # identical to current vault
             key = (Path(cat) / rel).as_posix()
             if key in manifest and proj_hash == manifest[key]:
-                continue  # untouched since mount — vault staleness, not a tuning
+                continue  # untouched since mount
             if key not in manifest and base.exists():
                 norm_hash = hashlib.sha256(
                     _normalize_legacy_format(p.read_bytes())).hexdigest()
                 if _matches_vault_history(vault, key, proj_hash, norm_hash):
-                    continue  # legacy mount matching a committed vault version
-                    #           (raw or wikilink-normalized) — stale, not a tuning
+                    continue
             out.append(Path(cat) / rel)
     return out
 
 
-def snapshot_overrides(project: Path, vault: Path, slug: str) -> int:
+def snapshot_overrides(project: Path, vault: Path, slug: str, platform: str = "claude") -> int:
     """Copy divergent agent/skill/command files into the central overrides store,
-    preserving <cat>/<rel>, and rewrite MANIFEST.md. If nothing diverges, clear the
-    store subdir so a reverted tuning doesn't linger and get re-applied later.
-    Returns the number of override files snapshotted."""
+    preserving <cat>/<rel>, and rewrite MANIFEST.md."""
     dst_root = overrides_dir(vault, slug)
-    rels = detect_overrides(project, vault)
+    rels = detect_overrides(project, vault, platform)
     if dst_root.exists():
-        shutil.rmtree(dst_root)          # start clean each snapshot
+        shutil.rmtree(dst_root)
     if not rels:
         return 0
+    p_name = f".{platform}" if not platform.startswith(".") else platform
     lines = [
-        "# Overrides — project-specific tunings snapshotted from .claude/",
+        f"# Overrides — project-specific tunings snapshotted from {p_name}/",
         "",
         f"project: {slug}",
         f"snapshot: {date.today().isoformat()}",
@@ -298,7 +297,7 @@ def snapshot_overrides(project: Path, vault: Path, slug: str) -> int:
         "|---|---|",
     ]
     for rel in rels:
-        src = project / ".claude" / rel
+        src = project / p_name / rel
         d = dst_root / rel
         d.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, d)
@@ -307,15 +306,13 @@ def snapshot_overrides(project: Path, vault: Path, slug: str) -> int:
     return len(rels)
 
 
-def restore_overrides(vault: Path, slug: str, project: Path) -> int:
-    """Re-apply snapshotted overrides on top of the freshly-mounted vault copy
-    (project override wins). Overwrites unconditionally — that's the point. Only
-    the known category subdirs are copied (MANIFEST.md stays central). Returns the
-    number of files re-applied."""
+def restore_overrides(vault: Path, slug: str, project: Path, platform: str = "claude") -> int:
+    """Re-apply snapshotted overrides on top of freshly-mounted vault copy."""
     src_root = overrides_dir(vault, slug)
     if not src_root.is_dir():
         return 0
     copied = 0
+    p_name = f".{platform}" if not platform.startswith(".") else platform
     for cat in OVERRIDE_CATEGORIES:
         src_cat = src_root / cat
         if not src_cat.is_dir():
@@ -324,7 +321,7 @@ def restore_overrides(vault: Path, slug: str, project: Path) -> int:
             if s.is_dir():
                 continue
             rel = s.relative_to(src_cat)
-            d = project / ".claude" / cat / rel
+            d = project / p_name / cat / rel
             d.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(s, d)
             copied += 1

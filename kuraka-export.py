@@ -315,6 +315,10 @@ def export_commands(vault: Path, project: Path, target: str, quiet: bool = False
             print(f"   ⚠️  {name}: {len(rendered)} chars > límite {ANTIGRAVITY_MAX} de Antigravity — truncado.")
             rendered = rendered[:ANTIGRAVITY_MAX - 200] + "\n\n> …(truncado por el límite de Antigravity).\n"
         (out_dir / f.name).write_text(rendered, encoding="utf-8")
+        if target == "antigravity":
+            alt_dir = project / ".agents" / "workflows"
+            alt_dir.mkdir(parents=True, exist_ok=True)
+            (alt_dir / f.name).write_text(rendered, encoding="utf-8")
         n += 1
     if not quiet:
         print(f"   + {n} comandos → {parent}/{sub}/")

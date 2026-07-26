@@ -506,7 +506,7 @@ estándar que leen Codex, Cursor, Antigravity, Gemini CLI…):
 ```bash
 kuraka mount --target codex        # AGENTS.md + comandos «/» en .codex/prompts/ (staging)
 kuraka mount --target cursor       # AGENTS.md + .cursor/rules/kuraka.mdc + .cursor/commands/
-kuraka mount --target antigravity  # AGENTS.md + .agent/workflows/ (comandos «/»)
+kuraka mount --target antigravity  # Montaje completo en .agents/ (agentes, skills, reglas) + .agent/workflows/ (comandos «/»)
 kuraka mount                        # (default) Claude Code → .claude/ completo
 ```
 
@@ -516,7 +516,7 @@ convertidos al mecanismo de cada herramienta:
 | Tool | Comandos en | Se invocan con | Nota |
 |---|---|---|---|
 | Cursor | `.cursor/commands/*.md` | `/nombre` | por-repo, listo tras montar |
-| Antigravity | `.agent/workflows/*.md` | `/nombre` | por-repo; límite 12k chars/archivo |
+| Antigravity | `.agent/workflows/*.md` y `.agents/` | `/nombre` | por-repo; montaje completo de agentes y skills |
 | Codex | `.codex/prompts/*.md` (staging) | `/prompts:nombre` | Codex los lee de tu **home**: `cp .codex/prompts/*.md ~/.codex/prompts/` |
 
 Se exportan todos menos los específicos de sie_v2 (`clean-cases`, `lint`,
@@ -620,3 +620,7 @@ Uso personal. Compartible con el equipo bajo acuerdo.
 ---
 
 *Última revisión: 2026-07-15 (d) — separación patrón/mecánica en los agentes de prueba: `e2e-tester`, `test-engineer` y sus skills quedan 100% stack-agnósticos (0 tokens de framework) y las mecánicas Angular/Material se movieron a `kuraka-artifacts/stack-profiles/angular.md` (nuevas secciones "Unit-test gotchas" y "E2E mechanics": DateAdapter Luxon, stub `_loadDependencies` de transloco, `[attr.aria-label]`/NG0303, `[formcontrolname]`, `mat-select` vía cdk-overlay, datepicker readonly dd/MM, `*appCanAccess` = elemento ausente, paginador con boundaries, gate Karma). Los agentes ahora cargan el stack-profile antes de escribir selectores → portables a React/Vue sin arrastrar Angular. Antes (c): e2e-tester + skill generate-e2e-tests: nuevo "CRUD test playbook" con una receta autocontenida y portable por operación (CREATE/insert con teardown, UPDATE/EDIT round-trip por-campo, DELETE soft-delete sin borrado físico, READ/LIST con shape+denormalizados) para generar TODAS las pruebas correctas en otra solución sin depender de las LLs del proyecto. Antes (b): e2e-tester Strict Rule 14 (inputs de fecha/datepicker son locale-formatted, no ISO; readonly = observe-only) autocontenida + portable sin las LLs del proyecto; nota de portabilidad en las reglas 8–14; misma regla en el skill generate-e2e-tests; nueva LL-020. Antes (a): mejoras a los agentes de pruebas (e2e-tester, test-engineer) y skills con reglas de test contra backend real (auth con refresh tokens rotativos, golden-path STRICT + expected-reds etiquetados, edición por-campo round-trip) y unit tests Angular/Material (DateAdapter Luxon, `_loadDependencies` transloco, `[attr.aria-label]`, gate Karma); LL-016…LL-019 en `projects/clinica-dental-2026/layer/lessons-learned/`. Base: store central `projects/<slug>/` + backup/restore branch-aware + CLI `kuraka`; 18 agentes; stack-profiles angular/express/react.*
+
+---
+
+*Last synced (docs): 2026-07-24 — RETRO-REQ-20260724-admin-rbac-visibility-refinements (GuaiHome Cycle 5).*

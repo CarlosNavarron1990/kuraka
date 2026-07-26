@@ -6,17 +6,18 @@ Replaces the old rsync/bash `mount-kuraka.sh` (which is now a thin wrapper aroun
 this). No external dependencies — pure Python 3 + git. Sibling scripts are invoked
 via `sys.executable` so it never assumes a `python3` on PATH (key on Windows).
 
-What it does (same as before):
+What it does:
   1. banner + (TTY) interactive menu of categories / status-only + MCP detection
   2. pre-flight snapshot of local overrides, then copy the vault categories in
   3. re-apply project overrides on top, update .gitignore, register, offer restore
   4. auto-seed a migration-example layer, adoption check, command catalog + guide
 
-Usage:  python3 kuraka-mount.py [target_dir]     (default: CWD)
+Usage:  python3 kuraka-mount.py [target_dir] [--target claude|antigravity|cursor|codex]
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from fnmatch import fnmatch
@@ -49,7 +50,6 @@ def _enable_windows_ansi() -> None:
     try:
         import ctypes
         k = ctypes.windll.kernel32
-        # ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING
         k.SetConsoleMode(k.GetStdHandle(-11), 7)
     except Exception:
         pass
@@ -60,9 +60,7 @@ def color_ok() -> bool:
 
 
 def run_py(script: str, *args: str, quiet: bool = False, check_env: bool = True):
-    """Invoke a sibling vault script with the current interpreter. When quiet,
-    capture+swallow output and never raise. Otherwise inherit stdio (so prompts
-    and colored output pass through). Returns the returncode (or None on error)."""
+    """Invoke a sibling vault script with the current interpreter."""
     import subprocess
     path = VAULT / script
     if not path.exists():
@@ -120,7 +118,7 @@ def banner() -> None:
 # ---------------------------------------------------------------- file copying
 
 def count_top(dstdir: Path) -> int:
-    """Top-level .md/.sh files (matches the old `find -maxdepth 1` counter)."""
+    """Top-level .md/.sh files."""
     if not dstdir.is_dir():
         return 0
     return sum(1 for p in dstdir.iterdir() if p.is_file() and p.suffix in (".md", ".sh"))
@@ -131,9 +129,7 @@ def _excluded(rel: Path, exclude: tuple[str, ...]) -> bool:
 
 
 def sync_tree(src: Path, dst: Path, exclude: tuple[str, ...] = ()) -> None:
-    """Mirror src→dst with `rsync --update` semantics: copy a file only if the
-    destination is missing or older than the source. Skips paths whose any part
-    matches an exclude glob (e.g. '*.append.md', '__pycache__')."""
+    """Mirror src→dst with `rsync --update` semantics."""
     import shutil
     if not src.is_dir():
         return
@@ -150,6 +146,25 @@ def sync_tree(src: Path, dst: Path, exclude: tuple[str, ...] = ()) -> None:
             shutil.copy2(sp, dp)
 
 
+def sync_antigravity_skills(src_skills: Path, dst_skills: Path) -> int:
+    """Sync vault skills to .agents/skills/ in Antigravity native skill structure:
+    each skill is a directory .agents/skills/<skill_name>/SKILL.md, plus preserving
+    subdirectories like evals/ and sentry-triage/."""
+    dst_skills.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for p in src_skills.glob("*.md"):
+        skill_name = p.stem
+        skill_dir = dst_skills / skill_name
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        copy_file(p, skill_dir / "SKILL.md")
+        copy_file(p, dst_skills / p.name)
+        count += 1
+    for d in src_skills.iterdir():
+        if d.is_dir():
+            sync_tree(d, dst_skills / d.name)
+    return count
+
+
 def copy_file(src: Path, dst: Path) -> None:
     import shutil
     if src.is_file():
@@ -161,7 +176,30 @@ def copy_file(src: Path, dst: Path) -> None:
 
 def main() -> int:
     _enable_windows_ansi()
-    target = Path(sys.argv[1] if len(sys.argv) > 1 else os.getcwd()).expanduser().resolve()
+
+    # argument parsing for target directory and target platform
+    target_dir_arg = None
+    target_env = "claude"
+
+    args_list = sys.argv[1:]
+    i = 0
+    while i < len(args_list):
+        a = args_list[i]
+        if a in ("--target", "-t"):
+            if i + 1 < len(args_list):
+                target_env = args_list[i + 1]
+                i += 2
+            else:
+                i += 1
+        elif a.startswith("--target="):
+            target_env = a.split("=", 1)[1]
+            i += 1
+        else:
+            if not target_dir_arg:
+                target_dir_arg = a
+            i += 1
+
+    target = Path(target_dir_arg or os.getcwd()).expanduser().resolve()
 
     if not VAULT.is_dir():
         print(f"❌ ERROR: vault no encontrado en {VAULT}", file=sys.stderr)
@@ -171,22 +209,32 @@ def main() -> int:
         return 1
 
     banner()
-    print(f"   vault:  {VAULT}")
-    print(f"   target: {target}")
+    print(f"   vault:    {VAULT}")
+    print(f"   target:   {target}")
+    print(f"   entorno:  {target_env}")
     print("")
 
-    claude = target / ".claude"
-    claude.mkdir(parents=True, exist_ok=True)
+    # Determine platform customization directory
+    if target_env == "antigravity":
+        platform_dir = target / ".agents"
+    elif target_env == "cursor":
+        platform_dir = target / ".cursor"
+    elif target_env == "codex":
+        platform_dir = target / ".codex"
+    else:
+        platform_dir = target / ".claude"
+
+    platform_dir.mkdir(parents=True, exist_ok=True)
 
     selected = {"agents", "skills", "commands", "rules", "artifacts"}
     menu_mode = "all"
     tty = sys.stdin.isatty()
 
     if tty:
-        if (claude / "agents").is_dir():
-            print("ℹ️  Kuraka YA está montado en este proyecto → esto es un re-mount (update).")
+        if (platform_dir / "agents").is_dir():
+            print(f"ℹ️  Kuraka YA está montado en este proyecto ({platform_dir.name}) → esto es un re-mount (update).")
         else:
-            print("🆕 Primer montaje de Kuraka en este proyecto.")
+            print(f"🆕 Primer montaje de Kuraka en este proyecto ({platform_dir.name}).")
         hist = capture_py("kuraka-restore.py", str(target), "--check")
         for line in hist.splitlines():
             if "historia en central" in line:
@@ -212,7 +260,6 @@ def main() -> int:
         elif choice.lower() == "s":
             menu_mode = "status"
 
-    # MCP + component detection (interactive only; single source of truth)
     if tty:
         run_py("kuraka-init.py", "--recommend-only", "--target", str(target))
 
@@ -224,7 +271,7 @@ def main() -> int:
         return cat in selected
 
     # pre-flight: snapshot local overrides BEFORE the copy overwrites them.
-    if (claude / "agents").is_dir():
+    if (platform_dir / "agents").is_dir():
         if run_py("kuraka-backup.py", str(target), "--overrides-only", quiet=True) == 0:
             print("   ✓ overrides locales respaldados al store central (pre-mount)")
             print("")
@@ -236,11 +283,14 @@ def main() -> int:
         if not want(wcat):
             continue
         src = VAULT / category
-        dst = claude / category
+        dst = platform_dir / category
         if src.is_dir():
             dst.mkdir(parents=True, exist_ok=True)
             before = count_top(dst)
-            sync_tree(src, dst, exclude=("*.append.md",))
+            if category == "skills" and target_env == "antigravity":
+                sync_antigravity_skills(src, dst)
+            else:
+                sync_tree(src, dst, exclude=("*.append.md",))
             after = count_top(dst)
             delta = after - before
             if delta > 0:
@@ -252,7 +302,7 @@ def main() -> int:
 
     # contexts sub-directory
     if want("agents") and (VAULT / "agents" / "contexts").is_dir():
-        sync_tree(VAULT / "agents" / "contexts", claude / "agents" / "contexts")
+        sync_tree(VAULT / "agents" / "contexts", platform_dir / "agents" / "contexts")
         print("   ✓ agents/contexts/")
 
     # personal rules (meta-rules of the agent system)
@@ -260,10 +310,10 @@ def main() -> int:
         for rule in ("16-agent-backup.md", "17-kuraka-token-optimizations.md"):
             src = VAULT / "rules" / rule
             if src.is_file():
-                copy_file(src, claude / "rules" / rule)
+                copy_file(src, platform_dir / "rules" / rule)
                 print(f"   ✓ rules/{rule}")
 
-    # framework-level artifacts outside .claude/
+    # framework-level artifacts outside platform_dir
     artifacts = VAULT / "kuraka-artifacts"
     if want("artifacts") and artifacts.is_dir():
         print("")
@@ -281,42 +331,62 @@ def main() -> int:
                       exclude=(".pytest_cache", "__pycache__"))
             print("   ✓ tests/kuraka/")
         if (artifacts / "stack-profiles").is_dir():
-            sync_tree(artifacts / "stack-profiles", claude / "stack-profiles")
+            sync_tree(artifacts / "stack-profiles", platform_dir / "stack-profiles")
+            if target_env == "antigravity":
+                sync_tree(artifacts / "stack-profiles", target / ".claude" / "stack-profiles")
             print("   ✓ stack-profiles/")
         if (artifacts / "templates").is_dir():
-            sync_tree(artifacts / "templates", claude / "templates")
+            sync_tree(artifacts / "templates", platform_dir / "templates")
+            if target_env == "antigravity":
+                sync_tree(artifacts / "templates", target / ".claude" / "templates")
             print("   ✓ templates/")
 
-    # record the vault baseline of what was just mounted, so override detection
-    # can tell "never touched by the project" (stale → refresh next mount) from
-    # "project-edited" (real override → preserve). Written BEFORE re-applying
-    # overrides: the manifest must hold the vault baseline, not the override.
+    # Export AGENTS.md + slash commands / workflows for target platform
+    if target_env in ("antigravity", "cursor", "codex"):
+        run_py("kuraka-export.py", str(target), "--target", target_env)
+
+    # record mount manifest
     try:
         import kuraka_common as _kc
         mounted_cats = tuple(c for c in _kc.OVERRIDE_CATEGORIES if want(c))
         if mounted_cats:
-            n = _kc.write_mount_manifest(target, VAULT, mounted_cats)
-            print(f"   ✓ mount manifest ({n} vault baselines → .claude/{_kc.MOUNT_MANIFEST_NAME})")
+            n = _kc.write_mount_manifest(target, VAULT, mounted_cats, platform=platform_dir.name)
+            print(f"   ✓ mount manifest ({n} vault baselines → {platform_dir.name}/{_kc.MOUNT_MANIFEST_NAME})")
     except ImportError:
-        print("   ⚠ kuraka_common.py not found — mount manifest skipped (override detection stays legacy)")
+        print("   ⚠ kuraka_common.py not found — mount manifest skipped")
 
-    # re-apply project-specific overrides on top of the fresh copy (always)
+    # re-apply project-specific overrides
     run_py("kuraka-restore.py", str(target), "--overrides-only")
 
     # --- ensure .gitignore excludes personal content ---
     gitignore = target / ".gitignore"
-    patterns = [
-        "# Kuraka framework files (versioned externally; not source of this repo)",
-        ".claude/agents/",
-        ".claude/skills/",
-        ".claude/commands/",
-        ".claude/hooks/",
-        ".claude/rules/16-agent-backup.md",
-        ".claude/rules/17-kuraka-token-optimizations.md",
-        ".claude/.kuraka-mount-manifest.json",
-        "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
-        "docs/process/agent-telemetry/*.json",
-    ]
+    if target_env == "antigravity":
+        patterns = [
+            "# Kuraka framework files (versioned externally; not source of this repo)",
+            ".agents/agents/",
+            ".agents/skills/",
+            ".agents/commands/",
+            ".agents/rules/16-agent-backup.md",
+            ".agents/rules/17-kuraka-token-optimizations.md",
+            ".agents/.kuraka-mount-manifest.json",
+            ".agent/workflows/",
+            "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
+            "docs/process/agent-telemetry/*.json",
+        ]
+    else:
+        patterns = [
+            "# Kuraka framework files (versioned externally; not source of this repo)",
+            ".claude/agents/",
+            ".claude/skills/",
+            ".claude/commands/",
+            ".claude/hooks/",
+            ".claude/rules/16-agent-backup.md",
+            ".claude/rules/17-kuraka-token-optimizations.md",
+            ".claude/.kuraka-mount-manifest.json",
+            "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
+            "docs/process/agent-telemetry/*.json",
+        ]
+
     existing = gitignore.read_text(encoding="utf-8", errors="ignore").splitlines() if gitignore.exists() else []
     to_add = [p for p in patterns if p not in existing]
     if to_add:
@@ -327,15 +397,15 @@ def main() -> int:
         print(f"   + {len(to_add)} entradas añadidas a .gitignore")
 
     print("")
-    print(f"✅ Kuraka montado en {target}/.claude/")
+    print(f"✅ Kuraka montado en {target}/{platform_dir.name}/")
     print("")
 
-    # auto-register in the vault registry (best-effort)
+    # auto-register in the vault registry
     if run_py("kuraka-init.py", "--target", str(target), "--register-only", "--yes", quiet=True) == 0:
         print("   ✓ registrado en el registro del vault (projects/)")
         print("")
 
-    # offer to restore Kuraka history (branch-switch recovery)
+    # offer to restore Kuraka history
     if (VAULT / "kuraka-restore.py").exists():
         if tty:
             run_py("kuraka-restore.py", str(target))
@@ -345,7 +415,7 @@ def main() -> int:
             print(f'      python3 "{VAULT / "kuraka-restore.py"}" "{target}"   # pregunta antes de pegar')
         print("")
 
-    # auto-seed from a pre-populated migration-example layer (first-time adoption)
+    # auto-seed from a pre-populated migration-example layer
     seed_src = artifacts / "migration-examples" / f"{target.name}-project-layer"
     if seed_src.is_dir():
         seeded = False
@@ -353,16 +423,20 @@ def main() -> int:
             copy_file(seed_src / "kuraka.config.yaml", target / "kuraka.config.yaml")
             print(f"   ✓ kuraka.config.yaml sembrado (migration-examples/{target.name}-project-layer → raíz)")
             seeded = True
-        if not (claude / "project").is_dir():
-            sync_tree(seed_src, claude / "project", exclude=("kuraka.config.yaml", "README.md"))
-            print(f"   ✓ .claude/project/ sembrado (migration-examples/{target.name}-project-layer)")
+
+        proj_dst = platform_dir / "project"
+        if not proj_dst.is_dir():
+            sync_tree(seed_src, proj_dst, exclude=("kuraka.config.yaml", "README.md"))
+            if target_env == "antigravity":
+                sync_tree(seed_src, target / ".claude" / "project", exclude=("kuraka.config.yaml", "README.md"))
+            print(f"   ✓ {platform_dir.name}/project/ sembrado (migration-examples/{target.name}-project-layer)")
             seeded = True
         if seeded:
             print("")
 
     # adoption check
     has_config = (target / "kuraka.config.yaml").exists()
-    has_project = (claude / "project").is_dir()
+    has_project = (platform_dir / "project").is_dir() or (target / ".claude" / "project").is_dir()
     layer_src = seed_src
     if not has_config or not has_project:
         print("⚠️  ATENCIÓN — ADOPCIÓN INCOMPLETA")
@@ -370,10 +444,10 @@ def main() -> int:
         if not has_config:
             print("   ❌ kuraka.config.yaml NO existe en el proyecto.")
         if not has_project:
-            print("   ❌ .claude/project/ NO existe en el proyecto.")
+            print(f"   ❌ {platform_dir.name}/project/ NO existe en el proyecto.")
         print("")
         print("   Los agentes refactorizados (v0.3+) leen kuraka.config.yaml para")
-        print("   paths y comandos, y .claude/project/ para convenciones y lecciones.")
+        print(f"   paths y comandos, y {platform_dir.name}/project/ para convenciones y lecciones.")
         print("   Sin esos dos artefactos, los agentes van a fallar o degradar a")
         print("   guidance genérico.")
         print("")
@@ -385,31 +459,39 @@ def main() -> int:
             if not has_config:
                 print('     cp "$SRC/kuraka.config.yaml" ./kuraka.config.yaml   # config pre-rellenado → RAÍZ del repo')
             if not has_project:
-                print("     mkdir -p .claude/project")
-                print('     cp -R "$SRC/." .claude/project/   # (excepto kuraka.config.yaml y README.md)')
+                print(f"     mkdir -p {platform_dir.name}/project")
+                print(f'     cp -R "$SRC/." {platform_dir.name}/project/   # (excepto kuraka.config.yaml y README.md)')
         else:
             if not has_config:
                 print('     cp "$KURAKA_VAULT/kuraka-artifacts/config-schema.yaml" ./kuraka.config.yaml')
                 print("     # editá kuraka.config.yaml con los valores reales del proyecto")
             if not has_project:
-                print("     mkdir -p .claude/project")
+                print(f"     mkdir -p {platform_dir.name}/project")
                 print("     # creá los archivos del layer a medida (ver kuraka-artifacts/migration-examples/README.md)")
         print("")
 
-    # command catalog + start guide (single source: kuraka-export.py)
-    run_py("kuraka-export.py", "--catalog", str(claude / "commands"), "--env", "claude", str(target))
+    # command catalog + start guide
+    if target_env == "antigravity":
+        cmd_dir = target / ".agent" / "workflows"
+    elif target_env == "cursor":
+        cmd_dir = target / ".cursor" / "commands"
+    elif target_env == "codex":
+        cmd_dir = target / ".codex" / "prompts"
+    else:
+        cmd_dir = target / ".claude" / "commands"
+
+    run_py("kuraka-export.py", "--catalog", str(cmd_dir), "--env", target_env, str(target))
 
     print("📋 NOTAS DEL MONTAJE:")
     print("")
     print("  • Unstage cualquier fichero personal ya indexado en git:")
-    print("     git restore --staged .claude/agents/ .claude/skills/ .claude/commands/ .claude/hooks/ 2>/dev/null || true")
-    print("     git restore --staged .claude/rules/16-agent-backup.md .claude/rules/17-kuraka-token-optimizations.md 2>/dev/null || true")
+    print(f"     git restore --staged {platform_dir.name}/agents/ {platform_dir.name}/skills/ {platform_dir.name}/commands/ 2>/dev/null || true")
+    print(f"     git restore --staged {platform_dir.name}/rules/16-agent-backup.md {platform_dir.name}/rules/17-kuraka-token-optimizations.md 2>/dev/null || true")
     print("")
     if synced_agents:
-        print("  • ⚠️  Reinicia Claude Code (/exit + nueva sesión) para registrar los agentes")
-        print("     como subagent_type — el runtime lee .claude/agents/ solo al arrancar.")
+        print(f"  • Agentes sincronizados en {platform_dir.name}/.")
     else:
-        print("  • Agentes ya presentes y sincronizados. No hace falta reiniciar.")
+        print("  • Agentes ya presentes y sincronizados.")
     print("")
     print("  • (Recomendado) Componentes que potencian Kuraka:")
     print(f"     {VAULT}/RECOMMENDED-COMPONENTS.md")

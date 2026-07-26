@@ -99,10 +99,8 @@ case "$sub" in
       echo ""
     fi
     case "$tgt" in
-      claude)
-        bash "$VAULT/mount-kuraka.sh" "$target" ;;
-      codex|cursor|antigravity)
-        python3 "$VAULT/kuraka-export.py" "$target" --target "$tgt" ;;
+      claude|codex|cursor|antigravity)
+        python3 "$VAULT/kuraka-mount.py" "$target" --target "$tgt" ;;
       *)
         echo "❌ target desconocido: $tgt  (claude | codex | cursor | antigravity)" >&2; exit 1 ;;
     esac
