@@ -247,11 +247,20 @@ Key non-negotiables:
 
 
 def _preamble(target: str) -> str:
+    if target == "antigravity":
+        return (
+            "> **Kuraka — entorno Antigravity.** En Antigravity adoptás vos cada rol secuencialmente.\n"
+            "> **REGLA DE CONTINUIDAD Y EJECUCIÓN DEL CICLO:**\n"
+            "> 1. Al ejecutar la Fase 1 (`po-analyst`), generá el documento REQ, presentá la tabla de fases y la pregunta del gate.\n"
+            "> 2. **CONTINUIDAD OBLIGATORIA DEL FLUJO**: Una vez que el usuario apruebe o indique continuar, **ADOPTÁ DE INMEDIATO** el rol de la siguiente fase (`story-refiner` para Fase 2 → `test-engineer` para Fase 2.5 → `architect-reviewer` para Fase 3 → `backend-developer`/`frontend-developer` para Fase 4 → `code-reviewer` para Fase 5 → `security-reviewer` para Fase 5.5 → `test-engineer` para Fase 6 → `final-auditor` para Fase 7).\n"
+            "> 3. No te detengas ni abandones el ciclo a mitad de camino; avanza rol por rol hasta completar la auditoría final y el archivado.\n"
+            "> 4. Consultá las convenciones en `.agents/project/` o `.claude/project/`, y los skills en `.agents/skills/` o `.claude/skills/`.\n\n"
+        )
     return (
         f"> **Kuraka — entorno {target}.** Este entorno no lanza subagentes aislados\n"
         f"> como Claude Code. Cuando un paso pida \"invocar el subagente X\", **adoptá\n"
         f"> vos ese rol** siguiendo `AGENTS.md` (raíz del repo) y el flujo de fases con\n"
-        f"> gates. Si existe `.claude/project/`, sus convenciones aplican igual.\n\n"
+        f"> gates. Si existe `.agents/project/` o `.claude/project/`, sus convenciones aplican igual.\n\n"
     )
 
 
@@ -276,6 +285,14 @@ def transform_command(name: str, text: str, target: str) -> str:
     # argument placeholder: codex substitutes $ARGUMENTS natively; others don't.
     if target != "codex":
         body = body.replace("$ARGUMENTS", "(los argumentos que escribiste después del comando)")
+
+    if target == "antigravity":
+        # Adapt paths from .claude/ to .agents/ for Antigravity environment
+        body = body.replace(".claude/skills/", ".agents/skills/")
+        body = body.replace(".claude/rules/", ".agents/rules/")
+        body = body.replace(".claude/agents/", ".agents/agents/")
+        body = body.replace(".claude/project/", ".agents/project/")
+        body = body.replace(".claude/stack-profiles/", ".agents/stack-profiles/")
 
     body = _preamble(target) + body
 

@@ -128,9 +128,8 @@ def _excluded(rel: Path, exclude: tuple[str, ...]) -> bool:
     return any(fnmatch(part, pat) for part in rel.parts for pat in exclude)
 
 
-def sync_tree(src: Path, dst: Path, exclude: tuple[str, ...] = ()) -> None:
+def sync_tree(src: Path, dst: Path, exclude: tuple[str, ...] = (), target_env: str = "claude") -> None:
     """Mirror src→dst with `rsync --update` semantics."""
-    import shutil
     if not src.is_dir():
         return
     for root, _dirs, files in os.walk(src):
@@ -142,8 +141,25 @@ def sync_tree(src: Path, dst: Path, exclude: tuple[str, ...] = ()) -> None:
             dp = dst / rel
             if dp.exists() and dp.stat().st_mtime >= sp.stat().st_mtime:
                 continue
-            dp.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(sp, dp)
+            copy_file(sp, dp, target_env=target_env)
+
+
+def copy_file(src: Path, dst: Path, target_env: str = "claude") -> None:
+    import shutil
+    if not src.is_file():
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if target_env == "antigravity" and src.suffix == ".md":
+        text = src.read_text(encoding="utf-8", errors="ignore")
+        text = text.replace(".claude/skills/", ".agents/skills/")
+        text = text.replace(".claude/rules/", ".agents/rules/")
+        text = text.replace(".claude/agents/", ".agents/agents/")
+        text = text.replace(".claude/project/", ".agents/project/")
+        text = text.replace(".claude/stack-profiles/", ".agents/stack-profiles/")
+        text = text.replace(".claude/templates/", ".agents/templates/")
+        dst.write_text(text, encoding="utf-8")
+    else:
+        shutil.copy2(src, dst)
 
 
 def sync_antigravity_skills(src_skills: Path, dst_skills: Path) -> int:
@@ -156,20 +172,13 @@ def sync_antigravity_skills(src_skills: Path, dst_skills: Path) -> int:
         skill_name = p.stem
         skill_dir = dst_skills / skill_name
         skill_dir.mkdir(parents=True, exist_ok=True)
-        copy_file(p, skill_dir / "SKILL.md")
-        copy_file(p, dst_skills / p.name)
+        copy_file(p, skill_dir / "SKILL.md", target_env="antigravity")
+        copy_file(p, dst_skills / p.name, target_env="antigravity")
         count += 1
     for d in src_skills.iterdir():
         if d.is_dir():
             sync_tree(d, dst_skills / d.name)
     return count
-
-
-def copy_file(src: Path, dst: Path) -> None:
-    import shutil
-    if src.is_file():
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
 
 
 # ------------------------------------------------------------------------- main
@@ -290,7 +299,7 @@ def main() -> int:
             if category == "skills" and target_env == "antigravity":
                 sync_antigravity_skills(src, dst)
             else:
-                sync_tree(src, dst, exclude=("*.append.md",))
+                sync_tree(src, dst, exclude=("*.append.md",), target_env=target_env)
             after = count_top(dst)
             delta = after - before
             if delta > 0:
@@ -302,7 +311,7 @@ def main() -> int:
 
     # contexts sub-directory
     if want("agents") and (VAULT / "agents" / "contexts").is_dir():
-        sync_tree(VAULT / "agents" / "contexts", platform_dir / "agents" / "contexts")
+        sync_tree(VAULT / "agents" / "contexts", platform_dir / "agents" / "contexts", target_env=target_env)
         print("   ✓ agents/contexts/")
 
     # personal rules (meta-rules of the agent system)
