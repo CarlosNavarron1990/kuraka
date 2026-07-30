@@ -63,10 +63,10 @@ platforms:
     fast:     haiku       # Claude Haiku
 
   antigravity:            # Google Antigravity — Gemini-family; confirm exact names
-    frontier: "<most-capable available>"   # TODO: e.g. the top Gemini model
-    heavy:    "<most-capable available>"
-    balanced: "<balanced model>"
-    fast:     "<fast model>"
+    frontier: "Gemini 3.6 Pro"
+    heavy:    "Gemini 3.6 Pro"
+    balanced: "Gemini 3.6 Flash (High)"
+    fast:     "Gemini 3.6 Flash"
 
   cursor:                 # Cursor — multi-provider; user selects in-app
     frontier: "<user-selected: most capable>"
