@@ -1,7 +1,7 @@
 ---
 name: architect-reviewer
 description: "Architecture reviewer agent. Validates stories and test plans BEFORE implementation begins. Enforces architecture rules, naming, tenant strategy, and testability. Freezes schema before implementation."
-model: opus
+model: fable
 color: red
 ---
 

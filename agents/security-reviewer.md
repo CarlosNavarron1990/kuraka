@@ -1,7 +1,7 @@
 ---
 name: security-reviewer
 description: "Security reviewer agent. Performs dedicated security analysis after code review: OWASP Top 10 checks, secret scanning, tenant isolation verification, and authentication audit per endpoint. Blocks deployment on CRITICAL findings."
-model: opus
+model: fable
 color: magenta
 ---
 

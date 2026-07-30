@@ -107,6 +107,38 @@ def read_agents(vault: Path) -> list[tuple[str, str]]:
     return out
 
 
+def read_agent_tiers(vault: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """(agent -> tier, tier -> one-line meaning) from MODEL-ROUTING.yaml.
+    Empty dicts if the map is absent (older vaults) — the role table then just
+    omits the tier column. Light parse of the fixed shape; no PyYAML."""
+    routing = vault / "MODEL-ROUTING.yaml"
+    agents: dict[str, str] = {}
+    tiers: dict[str, str] = {}
+    if not routing.is_file():
+        return agents, tiers
+    section = None
+    for raw in routing.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        s = raw.strip()
+        if " #" in s:
+            s = s.split(" #", 1)[0].strip()
+        if indent == 0:
+            key = s.split(":", 1)[0].strip()
+            section = key if key in ("tiers", "agents") else None
+            continue
+        if ":" not in s:
+            continue
+        k, _, v = s.partition(":")
+        k, v = k.strip(), v.strip().strip('"').strip("'")
+        if section == "tiers":
+            tiers[k] = v
+        elif section == "agents":
+            agents[k] = v
+    return agents, tiers
+
+
 def read_config(project: Path) -> dict:
     """Best-effort parse of the few kuraka.config.yaml fields we surface."""
     cfg = project / "kuraka.config.yaml"
@@ -141,7 +173,9 @@ def _g(cfg: dict, *keys: str, default: str = "—") -> str:
     return default
 
 
-def render_agents_md(project: Path, slug: str, cfg: dict, agents: list[tuple[str, str]]) -> str:
+def render_agents_md(project: Path, slug: str, cfg: dict, agents: list[tuple[str, str]],
+                     agent_tiers: dict[str, str] | None = None,
+                     tier_meanings: dict[str, str] | None = None) -> str:
     backend = _g(cfg, "stack.backend.framework", "stack.backend.language")
     frontend = _g(cfg, "stack.frontend.framework")
     lang = _g(cfg, "conventions.naming_language", default="english")
@@ -150,7 +184,28 @@ def render_agents_md(project: Path, slug: str, cfg: dict, agents: list[tuple[str
     maxfn = _g(cfg, "conventions.max_function_loc", default="—")
     has_layer = (project / ".claude" / "project").is_dir()
 
-    roles = "\n".join(f"| `{n}` | {d} |" for n, d in agents)
+    agent_tiers = agent_tiers or {}
+    tier_meanings = tier_meanings or {}
+    # When MODEL-ROUTING.yaml is present, the role table gains a "Model tier"
+    # column so a non-Claude tool (which picks its own model) knows which roles
+    # need its strongest model. Claude Code ignores this — it reads the real
+    # `model:` alias from each .claude/agents/*.md frontmatter instead.
+    if agent_tiers:
+        roles = "\n".join(f"| `{n}` | `{agent_tiers.get(n, '—')}` | {d} |" for n, d in agents)
+        roles_header = "| Role | Model tier | What it owns |\n|------|-----------|--------------|"
+        order = ["frontier", "heavy", "balanced", "fast"]
+        present = [t for t in order if t in tier_meanings] + \
+                  [t for t in tier_meanings if t not in order]
+        legend_rows = "\n".join(f"- **`{t}`** — {tier_meanings[t]}" for t in present)
+        legend = (
+            "\n**Model-tier legend** (this tool picks its own model — match the tier: "
+            "give `frontier`/`heavy` roles your most capable model, `fast` a cheap one):\n"
+            f"{legend_rows}\n"
+        )
+    else:
+        roles = "\n".join(f"| `{n}` | {d} |" for n, d in agents)
+        roles_header = "| Role | What it owns |\n|------|--------------|"
+        legend = ""
 
     return f"""# AGENTS.md — Kuraka workflow for `{slug}`
 
@@ -209,10 +264,9 @@ passes. Scale down (skip phases) only for trivial changes, and say which you ski
 
 ## Roles (adopt the mindset per phase)
 
-| Role | What it owns |
-|------|--------------|
+{roles_header}
 {roles}
-
+{legend}
 ## Token saving
 
 If RTK is installed for your tool, its hook compresses command output
@@ -448,9 +502,10 @@ def main() -> int:
     slug = kc.project_slug(project, args.name)
     cfg = read_config(project)
     agents = read_agents(vault)
+    agent_tiers, tier_meanings = read_agent_tiers(vault)
 
     print(f"🧩 kuraka export · target={args.target} · {slug}")
-    agents_md = render_agents_md(project, slug, cfg, agents)
+    agents_md = render_agents_md(project, slug, cfg, agents, agent_tiers, tier_meanings)
     (project / "AGENTS.md").write_text(agents_md, encoding="utf-8")
     print(f"   + AGENTS.md  ({len(agents)} roles, {len(agents_md.splitlines())} líneas)")
 

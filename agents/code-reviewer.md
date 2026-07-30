@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: "Code reviewer agent. Performs rigorous post-implementation review using the 6D framework (correctness, security, performance, maintainability, readability, tests). Enforces architecture rules and catches bugs before deployment."
-model: sonnet
+model: fable
 color: red
 ---
 

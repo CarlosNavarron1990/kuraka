@@ -1,7 +1,7 @@
 ---
 name: final-auditor
 description: "Final audit agent. Performs retrospective analysis after a cycle to identify rework causes, agent failures, and workflow improvements. Produces actionable RETRO documents."
-model: opus
+model: fable
 color: orange
 ---
 

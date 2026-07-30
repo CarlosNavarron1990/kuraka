@@ -1,0 +1,116 @@
+# =============================================================================
+# MODEL-ROUTING.yaml — single source of truth for which model tier each Kuraka
+# agent runs on, and how each tier resolves to a concrete model per PLATFORM.
+#
+# WHY THIS FILE EXISTS
+#   Agent frontmatter (`model:` in agents/*.md) used to be edited by hand, 21
+#   files at a time. This map centralizes the decision. `kuraka-apply-models.py`
+#   reads it and rewrites each agent's frontmatter for a given platform.
+#
+# THE ONE THING TO UNDERSTAND FIRST
+#   For Claude Code, tier names resolve to ALIASES (`fable`/`opus`/`sonnet`/
+#   `haiku`), NOT pinned IDs. Aliases auto-resolve to the current model in that
+#   tier — when Anthropic ships a new Opus, `opus` points to it with NO edit
+#   here. So a model *version bump* needs zero maintenance. You only touch this
+#   file to (a) move an agent to a different tier, or (b) add a platform.
+#   (Verified against code.claude.com/docs model-config: fable/opus/sonnet/haiku
+#    are all bare aliases that update over time.)
+#
+# HOW TO CHANGE ROUTING
+#   1. Edit the `agents:` map below (agent -> tier), or the `platforms:` table.
+#   2. Run:  python3 kuraka-apply-models.py            # applies the claude column
+#      or:   python3 kuraka-apply-models.py --check     # validate only, no writes
+#
+# schema_version: 1
+# =============================================================================
+
+schema_version: 1
+
+# -----------------------------------------------------------------------------
+# tiers — abstract capability levels, platform-independent. Ordered strongest
+# to cheapest. Agents are assigned to a tier by CAPABILITY NEED, not by a
+# specific model, so the same assignment survives model releases and ports to
+# any platform.
+# -----------------------------------------------------------------------------
+tiers:
+  frontier:  "Hardest reasoning + judgment GATES that must not be wrong (contract freeze, security, final audit). Cost is secondary to correctness."
+  heavy:     "Judgment / architecture / brownfield mapping / pentest. High capability, not necessarily the frontier."
+  balanced:  "Implementation and balanced authoring — backend/frontend/story/test writing."
+  fast:      "Mechanical, deterministic, or high-volume work where a cheap model suffices."
+
+# -----------------------------------------------------------------------------
+# platforms — tier -> concrete model, per platform Kuraka can mount into.
+#
+#   claude:  AUTHORITATIVE + machine-applied. These are Claude Code subagent
+#            aliases written verbatim into agents/*.md frontmatter by
+#            kuraka-apply-models.py. Must be values Claude Code accepts
+#            (fable | opus | sonnet | haiku | best | opusplan | opus[1m] |
+#             sonnet[1m] | inherit | a full model id like claude-opus-5).
+#
+#   Non-Claude platforms (antigravity, cursor, codex): these tools DON'T take a
+#   per-subagent model field — the Kuraka export drops `model:` and the user
+#   picks a model in the tool's own UI. So these columns are a RECOMMENDATION
+#   surfaced in the exported AGENTS.md role table ("for this role, select a
+#   model of at least this capability"), not something written to a frontmatter.
+#   Fill them with the real model names as you confirm each platform's catalog;
+#   `<user-selected>` means "no fixed mapping — user's chosen model applies".
+# -----------------------------------------------------------------------------
+platforms:
+  claude:
+    frontier: fable      # Claude Fable 5 — the judgment gates
+    heavy:    opus        # Claude Opus (auto-resolves to the current Opus)
+    balanced: sonnet      # Claude Sonnet (auto-resolves to the current Sonnet)
+    fast:     haiku       # Claude Haiku
+
+  antigravity:            # Google Antigravity — Gemini-family; confirm exact names
+    frontier: "<most-capable available>"   # TODO: e.g. the top Gemini model
+    heavy:    "<most-capable available>"
+    balanced: "<balanced model>"
+    fast:     "<fast model>"
+
+  cursor:                 # Cursor — multi-provider; user selects in-app
+    frontier: "<user-selected: most capable>"
+    heavy:    "<user-selected: most capable>"
+    balanced: "<user-selected: balanced>"
+    fast:     "<user-selected: fast>"
+
+  codex:                  # OpenAI Codex CLI — confirm exact names
+    frontier: "<most-capable available>"
+    heavy:    "<most-capable available>"
+    balanced: "<balanced model>"
+    fast:     "<fast model>"
+
+# -----------------------------------------------------------------------------
+# agents — every agents/*.md stem MUST appear here exactly once. The apply
+# script errors if an agent file has no tier here, or if a tier here has no
+# matching file (so adding/removing an agent forces a routing decision).
+# -----------------------------------------------------------------------------
+agents:
+  # frontier — the judgment gates promoted to Fable 5 (2026-07)
+  po-analyst:                  frontier
+  architect-reviewer:          frontier
+  code-reviewer:               frontier
+  security-reviewer:           frontier
+  final-auditor:               frontier
+
+  # heavy — judgment / architecture / brownfield / security audit
+  amauta:                      heavy
+  arki:                        heavy
+  inti:                        heavy
+  pentest-auditor:             heavy
+  checkmarx-remediation:       heavy
+  deploy-diagnostician:        heavy
+  provider-contract-validator: heavy
+  sentry-resolver:             heavy
+
+  # balanced — implementation + balanced authoring
+  backend-developer:           balanced
+  frontend-developer:          balanced
+  story-refiner:               balanced
+  test-engineer:               balanced
+
+  # fast — mechanical / deterministic / high-volume
+  deployment-verifier:         fast
+  e2e-tester:                  fast
+  migration-reviewer:          fast
+  pattern-detector:            fast

@@ -151,14 +151,39 @@ in `scripts/sync-obsidian.sh` or the reverse conversion breaks silently.
 
 ### Agent frontmatter contract
 
-Every `agents/*.md` must have `name` + `description` + `model` (one of `opus | sonnet |
-haiku`), and the frontmatter `name` must equal the filename stem. Every `skills/*.md`
-needs `name` + `description`. `validate-kuraka.sh` enforces this; CI-style usage is to
-run it in the target project after mounting.
+Every `agents/*.md` must have `name` + `description` + `model` (one of `fable | opus |
+sonnet | haiku`), and the frontmatter `name` must equal the filename stem. Every
+`skills/*.md` needs `name` + `description`. `validate-kuraka.sh` enforces this (its
+`VALID_MODELS`); CI-style usage is to run it in the target project after mounting.
 
-Model routing convention: **opus** for judgment-heavy agents (po-analyst, code-reviewer,
-security-reviewer, architect-reviewer, final-auditor), **sonnet** for
-implementation/balanced work, **haiku** for mechanical tasks.
+**Model routing is centralized in `MODEL-ROUTING.yaml` — do NOT hand-edit `model:` lines.**
+That file is the single source of truth: it maps each agent to a capability **tier**
+(`frontier`/`heavy`/`balanced`/`fast`) and each tier to a concrete model **per platform**
+(Claude, Antigravity, Cursor, Codex…). `kuraka-apply-models.py` reads it and rewrites
+every `agents/*.md` frontmatter `model:` for the Claude column:
+
+```bash
+python3 kuraka-apply-models.py           # apply the claude column to frontmatter
+python3 kuraka-apply-models.py --check    # validate map↔files + report drift (exit 1 on drift)
+```
+
+Current tiers → Claude model: **frontier → `fable`** (the judgment GATES: po-analyst,
+architect-reviewer, code-reviewer, security-reviewer, final-auditor), **heavy → `opus`**
+(architecture/brownfield/pentest/security-audit agents), **balanced → `sonnet`**
+(backend/frontend/story/test), **fast → `haiku`** (mechanical). To re-route an agent,
+change its tier in `MODEL-ROUTING.yaml` and run the script — never edit the frontmatter
+directly (the next `--check` would flag it as drift).
+
+Two things worth knowing (verified against code.claude.com/docs model-config):
+1. **Tier names are Claude aliases, not pinned IDs** — `opus`/`sonnet`/`haiku`/`fable`
+   auto-resolve to the *current* model in that tier, so a model version bump (Opus 5 →
+   Opus 6) needs **zero** edits here. You only touch the map to move an agent between
+   tiers or add a platform.
+2. **Non-Claude platforms don't take a per-subagent model** — the export drops `model:`
+   and the tool picks its own model. So the `antigravity`/`cursor`/`codex` columns in the
+   map are recommendations, surfaced as a "Model tier" column + legend in the exported
+   `AGENTS.md` role table (`kuraka-export.py`), telling the user which roles need their
+   strongest model.
 
 ### The orchestrator workflow
 

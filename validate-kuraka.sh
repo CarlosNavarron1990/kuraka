@@ -27,7 +27,7 @@ fi
 
 ERRORS=0
 WARNINGS=0
-VALID_MODELS="opus sonnet haiku"
+VALID_MODELS="fable opus sonnet haiku"
 
 echo "🪢 validate-kuraka — $TARGET"
 echo ""

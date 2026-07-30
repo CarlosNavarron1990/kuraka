@@ -1,7 +1,7 @@
 ---
 name: po-analyst
 description: "Product Owner analyst agent. Analyzes Jira tickets or raw requirements and produces structured REQ documents with scope, tables, endpoints, dependencies, and risk assessment."
-model: opus
+model: fable
 color: purple
 ---
 
