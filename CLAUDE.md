@@ -76,6 +76,22 @@ python3 -m pytest tests/kuraka/test_structure.py::test_should_have_valid_frontma
 There is no build system, linter, or package manager here. All scripts are POSIX shell
 or standalone Python 3 (no dependencies).
 
+### Suite versioning + harvest loop
+
+The framework suite is versioned: `SUITE-VERSION` (single line, semver) +
+`SUITE-CHANGELOG.md` (scheme + per-version results). Every mount stamps
+`suite_version` into the consumer's `.claude/.kuraka-mount-manifest.json`, and
+`archive_cycles` copies it into each archived cycle's `meta.yaml` — so retros can
+be grouped per suite version to compare rework across versions.
+
+`/kuraka-harvest` (vault-only command, `commands/kuraka-harvest.md`, symlinked into
+`.claude/commands/` so it's invocable here; in `EXPORT_SKIP`) is the improvement
+loop: run it when opening the vault. It collects `projects/*/overrides/`, classifies
+each divergence (stale vault copy / project tuning / core candidate), detects
+custom agents worth adopting, **proposes** integrations (user approves per item —
+NEVER auto-apply agent changes), then applies + bumps the version + updates the
+changelog. Version bumps happen ONLY through this flow.
+
 ## Architecture — what lives where, and why
 
 ### The vault layout mirrors `.claude/` in consumer projects
@@ -86,7 +102,7 @@ or standalone Python 3 (no dependencies).
 | `agents/contexts/*.md`    | `.claude/agents/contexts/`        | Per-agent rule bundles and output schemas |
 | `skills/*.md`             | `.claude/skills/`                 | Skill prompts (phase-level)               |
 | `commands/*.md`           | `.claude/commands/` · `.cursor/commands/` · `.agent/workflows/` · `.codex/prompts/` | Slash-command prompts. Claude: copied verbatim. Non-Claude: rendered by `kuraka-export.py::export_commands` (arg-placeholder + role preamble adapted per tool). `EXPORT_SKIP` = clean-cases/lint/run-tests (sie_v2) + sync-from-vault (Claude-only). |
-| `rules/16-*.md`, `17-*.md`, `18-*.md` | `.claude/rules/`           | Framework meta-rules (only these)         |
+| `rules/16-*.md`, `17-*.md`, `18-*.md`, `19-*.md` | `.claude/rules/`           | Framework meta-rules (only these)         |
 | `kuraka-artifacts/docs/process/**`    | `docs/process/**`           | lessons-learned + telemetry dashboard template |
 | `kuraka-artifacts/tests/kuraka/**`    | `tests/kuraka/**`           | Structural eval harness                   |
 
@@ -215,8 +231,9 @@ docs live inside `kuraka-artifacts/docs/` (note: `kuraka-artifacts/` is tracked)
 ### `rules/01-*.md` through `rules/15-*.md` are also gitignored
 
 Those are sie_v2 team conventions that live in *that* project's git, not here. Only
-`rules/16-agent-backup.md`, `17-kuraka-token-optimizations.md`, and
-`18-duplication-aware-refactor.md` are framework rules tracked by this repo. If you
+`rules/16-agent-backup.md`, `17-kuraka-token-optimizations.md`,
+`18-duplication-aware-refactor.md`, and `19-evidence.md` are framework rules
+tracked by this repo. If you
 need to edit a rule in the 01–15 range, you are in the wrong repository.
 
 ### The `VAULT=` path is hardcoded in three places

@@ -32,6 +32,11 @@ the full loading sequence):
 4. `.claude/project/glossary.md` if present — domain vocabulary.
 5. `.claude/project/lessons-learned/*.md` filtered by `applies_to`
    including `po-analyst`.
+6. `docs/arquitectura/domain-model.md` + `docs/discovery/requirements.md`
+   (resolved decisions) + `docs/discovery/decisiones-abiertas.md` — when
+   present. Proposed tables must be consistent with the frozen domain
+   model, and resolved decisions are never silently re-decided (conflicts
+   → flag in the REQ).
 
 ### 2. Analyze the requirement
 

@@ -15,6 +15,34 @@ Reduced-by-risk, Lite, Retroactive).
 Every `Agent` call has retry and timeout policies to prevent silent
 failures from propagating through the workflow.
 
+### Role lock (MANDATORY prompt preamble)
+
+Every subagent invocation prompt begins with a role lock:
+
+> You are a specialist subagent inside a running Kuraka cycle — the phase and
+> the inputs in THIS prompt are your entire task. Do not read `kuraka.md` /
+> `kuraka-modes.md`, do not propose a pipeline, do not ask what the requirement
+> is. If an input artifact you need is missing, ask ONE precise question and
+> stop.
+
+Without it, a subagent can drift into acting as the orchestrator (guai
+REQ-20260722: a Phase-2.5 invocation re-derived the whole pipeline and produced
+nothing — 66K tokens; the explicit lock eliminated the confusion in later
+cycles).
+
+### Git is READ-ONLY for review/verify subagents (HARD)
+
+`architect-reviewer`, `code-reviewer`, `security-reviewer`, `test-engineer`
+(review modes), `e2e-tester`, `deployment-verifier`, `migration-reviewer` — and
+any agent whose job is to JUDGE work rather than produce it — may run only
+read-only git: `status`, `log`, `diff`, `show`, `branch --list`, `rev-parse`.
+They must NEVER run `merge`, `pull`, `checkout`, `switch`, `reset`, `rebase`,
+`cherry-pick`, `stash pop`, `commit`, or `push`. A dirty or mid-merge tree found
+on entry is a **BLOCKER to report, never a state to resolve**. (guai
+REQ-20260721: a reviewer triggered an unintended `git merge` mid-review and left
+the consumer branch in a conflicted state.) Writes to the working tree belong to
+implementer agents and the orchestrator only.
+
 ### Retry policy
 
 - **Max 2 retries per agent** (3 total attempts).
@@ -133,6 +161,16 @@ typecheck + test ALL pass**, not just the test runner.
 - Every agent's "tests green" claim must imply a clean typecheck. Prefer a
   single `make check` target (lint + typecheck + test) so the gate is one
   command that cannot pass while the build is broken.
+
+- **The environment the gate runs in must be current.** A story that touches
+  the dependency manifest, lockfile, or migrations forces a rebuild of the
+  test image/environment BEFORE its gate is trusted (no-cache if migrations
+  changed); the gate never runs shadowed by host artifacts (e.g. a bind-mounted
+  `node_modules`). A sudden burst of `Can't locate revision` / `column does not
+  exist` after touching migrations is a false regression from a stale image —
+  rebuild, don't chase (adela: two false greens in one cycle; guai: ~179 phantom
+  failures). `deployment-verifier` confirms new deps are present in the built
+  image.
 
 Reference: kuraka-control LL-014 — an invalid `as string` cast rode green ~3
 cycles because the Phase-4 gate ran vitest only. Also `gate command integrity`

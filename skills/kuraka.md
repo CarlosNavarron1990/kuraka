@@ -140,6 +140,7 @@ one sentence — not folded into a phase row.
 
 | Phase | Agent | Condition |
 |-------|-------|-----------|
+| 0 (pre-flow) | `jira-ticket-sync` | Only if the project tracks work in Jira (Jira MCP connected) and the user asks to sync/list pending tickets, or a cycle starts from a Jira ticket with no local file. Output feeds Phase 1 as REQ input. |
 | 5 (sub) | `migration-reviewer` | Only if there are files in `${architecture.paths.migrations_root}` |
 
 ---
@@ -219,6 +220,15 @@ The ORCHESTRATOR runs these directly (no subagent, `rules/17` T9 style):
 
 Gate: checkpoint contains `baseline_red` + `baseline_green`, and the gate
 command is proven able to fail (rule 17 T7).
+
+**Per-gate environment re-probe (not just once at 3.9).** Before EVERY later
+gate that runs the test command (per-story 4a/4b, Phase 6, retro-gates), the
+orchestrator re-runs a ~0-token probe: container daemon up (`docker info` or
+equivalent) and the test-DB port free of foreign containers. On failure, print
+the exact remediation command and **RE-POLL the probe until green** — never
+advance on a verbal "it's running now" (sie-v2: a down daemon reported as up
+cost lost turns in 3 cycles; a port-5434 collision was caught at zero cost by
+exactly this probe).
 
 ### Phase 4 — Implementation
 
@@ -373,13 +383,29 @@ to skip 6.8 ONLY in these cases, and only with explicit approval:
   not available in dev). In this case, open a follow-up to add the
   smoke test when the infrastructure is available.
 
+**"The agent cannot run it" ≠ "it cannot be run" (HARD).** If the smoke is
+not automatable from the agent's host but the USER can run the app (their
+IDE, a Windows box, a corp VPN), the smoke is NOT skipped — it becomes a
+**user-executed smoke**: the orchestrator writes the full scenario FIRST
+(preconditions, numbered steps, expected assertion per step) into
+`SMOKE-{ticket}.md`, the user executes and reports, the agent records the
+observed column + verdict. Handoffs quote the verdict **textually**
+(`PASS PARCIAL` stays `PASS PARCIAL`, never a numeric paraphrase). For
+cycles touching **auth / session / security-critical paths** this is a
+BLOCKING gate with no deferral: without an executed smoke the cycle closes
+**`PENDING-SMOKE`**, never DONE (facturacion-honorarios ENTRAID: conflating
+the two let 5 stacked defects survive a "closed" cycle — the most expensive
+defect in the vault's corpus, one full extra cycle + 5 user-in-the-loop
+iterations).
+
 If the user approves the skip, **document it in the Phase 7 RETRO** as
 an accepted risk with the textual justification.
 
 **Gate**:
 `${architecture.paths.docs_process_root}/smoke-tests/SMOKE-{ticket}.md`
-exists and green, OR skip justification approved by the user and
-documented in the RETRO.
+exists and green (agent-run or user-executed), OR skip justification
+approved by the user and documented in the RETRO. Auth/session/security
+cycles: no skip — executed smoke or `PENDING-SMOKE`.
 
 **Why**: lessons such as the smoke-test invariant generalize a common
 failure mode — `${stack.backend.test_cmd}` green + reviews approved +
@@ -445,6 +471,18 @@ errors and broken telemetry.
 - **Token optimization**: apply `rules/17-kuraka-token-optimizations.md`
   (context digest, end-only typecheck, combined phases, mapping-table
   stories, no auto-verify, reviewer digests, delta-only re-runs).
+- **Frozen contracts are never paraphrased** (HARD): an implementation/fix
+  prompt references SCHEMA-FROZEN by anchor and pastes the **literal contract
+  block + the delta** — never rewritten signatures or re-described wiring
+  locations (two prompt-divergence defects came from paraphrase). Any text a
+  parser will read (XML/JSON/YAML/SQL/config) is pasted in final syntax or
+  delegated to an implementer; after ANY config-file edit the orchestrator
+  validates it with the real parser at ~0 tokens (e.g.
+  `python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse(sys.argv[1])" f`)
+  — never by "reading it". Presence/absence claims about config entries use a
+  parser, not grep: comments defeat grep in both directions (an XML comment
+  containing `--` broke an entire Web.config parse — 8 cascading errors with
+  the user stuck in a live debug loop; 5 grep gates were wrong in one cycle).
 - **Claims are reproduced, never quoted** (`rules/17` T9): before declaring
   any gate green, the orchestrator itself runs the cheap deterministic
   checks — `git diff` of every function a report claims "untouched",

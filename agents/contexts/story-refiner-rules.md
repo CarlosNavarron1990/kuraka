@@ -39,6 +39,18 @@ Read each in order:
 4. `.claude/project/agents/story-refiner.append.md` — addendum.
 5. `.claude/project/glossary.md` — use the project's terms in stories.
 
+## 3b. Architecture docs (when present)
+
+- `docs/arquitectura/domain-model.md` — for stories touching stateful
+  entities, ACs must match the frozen state machine (statuses,
+  transitions, guards). A story that adds/changes a state is a
+  domain-model change and must say so explicitly.
+- `docs/arquitectura/flujos/` — the edge-case matrix (casuística) is a
+  source of ACs; don't let cases the discovery already mapped drop out
+  because the REQ summarized them.
+
+Skip if absent (project without bootstrap docs).
+
 ## 4. The approved REQ (always, current cycle)
 
 - The Phase 1 REQ document. Stories must derive from it directly; you

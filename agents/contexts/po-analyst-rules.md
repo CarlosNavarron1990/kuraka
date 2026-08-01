@@ -64,6 +64,26 @@ If `.claude/project/` does not exist or is empty, the project is using
 framework defaults only. That is valid; proceed with the framework prompt
 + stack profile only.
 
+## 3b. Architecture & discovery docs (when present)
+
+Bootstrapped projects (via `inti`/`arki`) carry frozen specifications:
+
+- `docs/arquitectura/domain-model.md` — the domain model + state machine.
+  Proposed tables must extend it, not contradict it. If the requirement
+  demands a change to a frozen entity/state, call that out explicitly in
+  the REQ as a domain-model change.
+- `docs/arquitectura/flujos/` — sequence diagrams + edge-case matrix for
+  the flows the requirement touches.
+- `docs/discovery/requirements.md` (resolved RN/CF decisions) and
+  `docs/discovery/decisiones-abiertas.md` — decisions already resolved
+  with the user (value-flow model, matching, concurrency, revenue
+  recognition, approval policy…). Never re-decide one silently; a
+  requirement that conflicts with a resolved decision is a BLOCKER-level
+  clarification for the user, not something you re-interpret.
+
+If these docs don't exist (project onboarded without bootstrap), skip —
+the project layer + glossary are the domain source.
+
 ## 4. Output schema (always, last)
 
 - `.claude/agents/contexts/output-schemas.md#po-analyst` — the contract

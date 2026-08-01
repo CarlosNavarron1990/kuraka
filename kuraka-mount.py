@@ -316,7 +316,8 @@ def main() -> int:
 
     # personal rules (meta-rules of the agent system)
     if want("rules"):
-        for rule in ("16-agent-backup.md", "17-kuraka-token-optimizations.md"):
+        for rule in ("16-agent-backup.md", "17-kuraka-token-optimizations.md",
+                     "18-duplication-aware-refactor.md", "19-evidence.md"):
             src = VAULT / "rules" / rule
             if src.is_file():
                 copy_file(src, platform_dir / "rules" / rule)
@@ -377,10 +378,15 @@ def main() -> int:
             ".agents/commands/",
             ".agents/rules/16-agent-backup.md",
             ".agents/rules/17-kuraka-token-optimizations.md",
+            ".agents/rules/18-duplication-aware-refactor.md",
+            ".agents/rules/19-evidence.md",
             ".agents/.kuraka-mount-manifest.json",
             ".agent/workflows/",
             "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
             "docs/process/agent-telemetry/*.json",
+            "# Tool scratch dirs (never track)",
+            ".playwright-mcp/",
+            ".pytest_cache/",
         ]
     else:
         patterns = [
@@ -391,9 +397,14 @@ def main() -> int:
             ".claude/hooks/",
             ".claude/rules/16-agent-backup.md",
             ".claude/rules/17-kuraka-token-optimizations.md",
+            ".claude/rules/18-duplication-aware-refactor.md",
+            ".claude/rules/19-evidence.md",
             ".claude/.kuraka-mount-manifest.json",
             "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
             "docs/process/agent-telemetry/*.json",
+            "# Tool scratch dirs (never track)",
+            ".playwright-mcp/",
+            ".pytest_cache/",
         ]
 
     existing = gitignore.read_text(encoding="utf-8", errors="ignore").splitlines() if gitignore.exists() else []

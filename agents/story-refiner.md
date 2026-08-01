@@ -35,7 +35,11 @@ Load context in this order; later items override earlier ones.
      `story-refiner`.
    - `.claude/project/agents/story-refiner.append.md`
    - `.claude/project/glossary.md` — use the project's terms.
-4. **The approved REQ** from Phase 1.
+4. **Architecture docs** (when present): `docs/arquitectura/domain-model.md`
+   (state machine — story ACs for stateful entities must match its
+   transitions/guards) and `docs/arquitectura/flujos/` (edge-case matrix —
+   mine it for ACs the REQ may have summarized away).
+5. **The approved REQ** from Phase 1.
 
 The detailed loading sequence lives in
 `.claude/agents/contexts/story-refiner-rules.md`.
@@ -177,6 +181,23 @@ with `architecture.paths.*`. For example with `python-fastapi` profile:
     a symbol/file, include a grep inventory of every test/fixture/seed that
     references the old name, and instruct evolving those in place (`git mv`),
     never creating a parallel `*_rename` file that orphans the originals.
+18b. **Replicated flows and dual paths carry a parity table** — when a story
+    replicates an existing flow ("like flow X / reuse X") or adds a second
+    parallel path to one (a second auth path, provider, population):
+    (a) **Field parity**: a field-by-field table of every write the ORIGINAL
+    path performs (`file:line` + the exact expression) vs the new path —
+    including fallback-only-read and audit fields. Any unparity row is
+    justified in writing in the story, or it is a BLOCKER for the architect.
+    A code comment claiming parity is not verification. (The omission is
+    precisely what a diff review cannot see — this class recurred 3× in
+    facturacion-honorarios and survived implementation plus both reviews.)
+    (b) **Affordance parity**: enumerate the reference screen/flow's
+    affordances and mark each INCLUDE or EXPLICITLY-EXCLUDE (prefill,
+    business validations, pickers, error/empty states, modal sub-flows). A
+    mode change carries implicit sub-flows — login-required ⇒ a registration
+    path; public ⇒ anonymous session; role-scoped ⇒ wrong-role redirect
+    (guai S14: the "minimal" re-implementation was missing four of these and
+    needed a post-smoke rework commit).
 19. **AC self-consistency lint (run before delivering — mechanical)** — a story
     must not contradict itself or assert unverified premises:
     (a) RUN every grep the story pins as normative against the story's OWN

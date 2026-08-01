@@ -29,7 +29,7 @@ TARGETS = ("codex", "cursor", "antigravity")
 # never exported to other tools. sync-from-vault is a Claude-only vault→project
 # migration. kuraka-wizard IS exported: it is platform-aware (detects the tool it's
 # running in and checks the mount for THAT platform), so it works in every environment.
-EXPORT_SKIP = {"clean-cases", "lint", "run-tests", "sync-from-vault"}
+EXPORT_SKIP = {"clean-cases", "lint", "run-tests", "sync-from-vault", "kuraka-harvest"}
 
 # Where each tool reads its slash-commands from, and how it invokes them.
 TARGET_CMD_DIR = {

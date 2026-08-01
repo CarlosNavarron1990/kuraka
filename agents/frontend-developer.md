@@ -69,17 +69,46 @@ Follow the implementation order specified in the stack profile for
 - The framework's state management idioms.
 - Styling conventions.
 
-### Design resources (when available)
+### Design source of truth — read the actual design, never infer it from prose (MANDATORY)
 
-For any non-trivial UI work (new screens, components, layout, theming, empty
-states), use the **`ui-ux-pro-max`** skill if it is installed — it supplies
-styles, color palettes, font pairings, UX guidelines, and chart patterns, and
-can pull real component examples via the shadcn/ui MCP. For visual audit/polish
-of an existing interface, use the **`impeccable`** skill. These are optional
-companions (see the vault's `RECOMMENDED-COMPONENTS.md`); if they are not
-present, fall back to the project's branding conventions and proceed. Always
-reconcile their output with `.claude/project/conventions/frontend-branding.md`
-(project tokens win over generic suggestions).
+If a story — or the component it targets — references a design frame (e.g.
+`docs/adela.pen frame KCP5V`, a Pencil frame id, a Figma link, or any design
+file), **that design is the source of truth for layout, spacing, visual
+hierarchy, component structure, states and tokens**. The story's prose says
+*what* the screen does; the design defines *how it looks*. You MUST open the
+referenced design and implement to match it — building a design-referenced
+screen from the textual description alone is a defect, not a shortcut. A story
+that cites a frame is **not done** until the implementation is visually faithful
+to that frame.
+
+For a `.pen` file, use the **Pencil MCP** (never `Read`/`Grep` on `.pen` — they
+are encrypted):
+
+1. `get_editor_state(include_schema: true)` — load the file + schema (required
+   before any other Pencil call).
+2. `batch_get` / `export_html` / `get_screenshot` of the referenced frame(s) —
+   see the real layout, component tree, order, spacing scale, and states.
+3. `get_variables` — the design system's tokens (colors, typography, spacing).
+   Reuse those tokens/component classes in the implementation; do not invent
+   parallel styles or inline hex values.
+
+Implement the screen to be visually faithful to the frame: same structure and
+order, spacing scale, component variants, empty/loading/error states. If the
+design and the story's functional contract conflict, follow the functional
+contract for **behavior** and the design for **presentation**, and flag the
+conflict in your report. If the Pencil MCP is not connected (Pen.app not open),
+STOP and report that the design source is unavailable — do not guess.
+
+### Design resources (companions, when no project design file exists)
+
+When a screen has **no** referenced design frame, use the **`ui-ux-pro-max`**
+skill if installed (styles, palettes, font pairings, UX guidelines, chart
+patterns, shadcn/ui MCP examples), and **`impeccable`** for visual audit/polish
+of an existing interface. These are optional (see the vault's
+`RECOMMENDED-COMPONENTS.md`); if absent, fall back to the project's branding
+conventions. Always reconcile their output — and any design-file tokens — with
+`.claude/project/conventions/frontend-branding.md` (project tokens win over
+generic suggestions).
 
 ### Apply config-driven conventions
 

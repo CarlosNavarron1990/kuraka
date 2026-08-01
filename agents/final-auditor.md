@@ -95,15 +95,30 @@ actually applied:
 | Prior patch (file · change) | Applied? | Evidence (grep / file exists) |
 |-----------------------------|:--------:|-------------------------------|
 
-- A patch proposed last cycle but **not landed** is a finding in *this* retro,
-  listed under "Systemic Issues".
-- A recommendation that recurs un-applied across ≥2 retros is an **escalating
-  systemic finding** — flag it and (if project-layer and safe) apply it now.
+- **This check is a closing GATE, not a report line.** A project-layer patch
+  proposed last cycle either (a) is APPLIED during this Phase 7 and verified
+  with the evidence command the retro declared (`grep -c`, `test -f` — run it,
+  paste the result in the table), or (b) carries a per-patch user decline in
+  writing. Do NOT close the cycle with silently un-applied project-layer
+  patches. ≥2 retros un-applied = must-apply (no longer optional). After
+  applying, the vault backup (mandatory last step) makes it durable — a patch
+  that lives only in the project's gitignored `.claude/` is not landed until
+  the backup exits 0.
+- **Framework-tier patches** (changes to the vault's canonical agents/skills/
+  rules) are NOT applied from a consumer project. Record each as
+  **`OPEN FRAMEWORK DEBT`** in the retro with an occurrence counter
+  (`proposed in N retros: <list>`); the user's `/kuraka-harvest` in the vault
+  is the flow that lands them. Incrementing the counter each cycle is what
+  makes the debt visible to the harvest.
+- **A lesson-learned without its INDEX row is invisible.** Any LL file written
+  this cycle ships its `INDEX.md` row in the same change block, verified with
+  `grep -c "<LL-id>" INDEX.md` ≥ 1.
 
-Rationale: the framework keeps re-proposing the same fixes because nothing
-verifies they landed (clinica-dental: LL-004/005 + the contract-probe rule were
-proposed and never applied, so the same Swagger failure recurred a full cycle
-later). This closes the retro → apply → verify loop.
+Rationale: soft wording ("flag it and, if safe, apply") empirically does not
+hold — guai ran 3 consecutive cycles with 9→5 proposed patches almost all
+un-landed, and facturacion-honorarios landed 0/11 with the framework tier at
+0% historically, the same fixes re-proposed 4 retros running. This closes the
+retro → apply → verify loop with a gate instead of an intention.
 
 ## 1) Summary
 - Total iterations: [low/medium/high]

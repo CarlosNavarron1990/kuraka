@@ -95,6 +95,16 @@ run them every time, not only when told to.
 - [ ] **Sibling-guard parity** — when one member of a parser/extractor family is
   edited, every sibling guard (truncation/null/optional-chaining) is mirrored;
   a count/label restated across docstrings is grep-updated everywhere.
+- [ ] **Cache-namespace invalidation completeness** — for each cache
+  invalidation in the diff (`cache.invalidate(KEY)`, `delete(KEY)`), grep the
+  key's namespace for derived sibling sub-keys (`KEY:last_sync`, `KEY:{id}`,
+  `f"{KEY}:..."`): ALL must be invalidated together, or the code must use a
+  pattern/namespace invalidation. A NEW sub-key added by the diff requires
+  updating the existing invalidation sites. Also flag completeness-blind tests
+  (`assert_called_once` on the invalidator instead of asserting the full target
+  set). Unit tests structurally cannot catch this class — caches are cleared
+  between cases — which is why it reviews here (recurred in 3 vault projects:
+  adela, dbcanvas, sie-v2; stale-subkey bugs reached production).
 - [ ] **Scope-fidelity diff** — compare the SET of changed functions
   (`git diff <baseline>..HEAD`, read per-function hunks) against the SET the
   story authorizes as MODIFY. Any extra changed function is a BLOCKER (scope

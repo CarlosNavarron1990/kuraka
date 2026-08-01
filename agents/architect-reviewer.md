@@ -36,7 +36,12 @@ Load context in this order; later items override earlier ones.
    - `.claude/project/lessons-learned/*.md` — files whose frontmatter
      `applies_to` includes `architect-reviewer`.
    - `.claude/project/agents/architect-reviewer.append.md` — addendum.
-4. **Artifacts under review**:
+4. **Architecture docs** (when present): `docs/arquitectura/domain-model.md`
+   + `docs/arquitectura/flujos/` + ADRs — the schema you freeze must be
+   consistent with the frozen domain model and resolved discovery decisions;
+   an inconsistency is a BLOCKER (either fix the stories or escalate a
+   domain-model change to the user).
+5. **Artifacts under review**:
    - Story files in `${architecture.paths.docs_process_root}/stories/`.
    - Test plan in `${architecture.paths.docs_process_root}/test-plans/TEST-PLAN-{ticket}.md`.
 
@@ -63,6 +68,7 @@ The detailed loading sequence lives in `.claude/agents/contexts/architect-review
 | 13 | TypeScript syntax precision: for interface/type stories, AC specifies exact syntax (e.g. `nombre?: string` vs `nombre: string \| null`) — informal language ("optional string") is a MINOR finding | stack profile (TypeScript) |
 | 14 | Contract provenance: any endpoint/external contract cites an in-vivo probe (not docs/Swagger); any DB claim quotes the defining migration (`file:line`); verbatim payloads diffed field-by-field. Missing provenance on a new/re-wired contract is a BLOCKER | universal |
 | 15 | Mechanism named: any parse/compare/curate/serialize step with >1 reasonable implementation has its resolved mechanism stated in the AC (not a prose hedge) | universal |
+| 16 | Parity table present: a story that replicates a flow or adds a second parallel path (second auth path, provider, population) carries the field-by-field write-parity table (`file:line` + expression per write of the original path) and the INCLUDE/EXCLUDE affordance list (story-refiner rule 18b). Missing table, or an unjustified unparity row, is a BLOCKER — a comment claiming parity is not verification (class recurred 3× in facturacion-honorarios, invisible to diff review) | universal |
 
 ### Test Plan Checklist
 

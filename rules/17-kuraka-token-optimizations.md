@@ -69,6 +69,26 @@ subagent prompt under a fixed header:
 
 The agent only re-reads if it finds ambiguity.
 
+**Digest-trust protocol (mandatory — the digest is only useful if it can be
+trusted):**
+
+- The orchestrator stamps the digest header **`VERIFIED`** only when it
+  reproduced the claims itself (T9-style: ran the greps, read the cited lines
+  this cycle, against THIS target). A `VERIFIED` digest may be consumed by the
+  subagent **without re-reading the cited files** — re-grounding a stamped
+  digest is the single worst recurring budget leak (guai: story-refiner over
+  budget 6/29 cycles, one 287K/77-tool re-verification run). An **unstamped**
+  digest is a hint, not truth: the agent treats its anchors as unverified claims.
+- **Re-scope invalidates the digest.** If the cycle is re-pointed at a different
+  codebase, module, branch, or target than the digest was built from, the
+  orchestrator REBUILDS the digest from the target's real files and re-verifies
+  every anchor (file:line, switch cases, enum values) before it enters a
+  REQ/brief. A stale digest anchor leaked a phantom requirement from a sibling
+  codebase into a brief (sie DD1243: ~406K tokens of mis-scoped work).
+- **Hard context ceiling per agent:** the invocation states the digest/package
+  budget; if the package would breach it before the agent's first tool call, the
+  agent asks the orchestrator to narrow it instead of absorbing it.
+
 **Estimated savings:** 30–50K tokens per additional subagent. For a 3-phase
 workflow: **100–150K total.**
 
@@ -208,13 +228,17 @@ wasted 200K-token subagent invocation.
 
 **Cómo**:
 - NO lanzar varias stories en paralelo. Implementar las stories **secuencialmente**.
-- Después de que cada story termine, correr `make test` (o `make test-fast`) **antes** de empezar la siguiente.
-- Si `make test` falla, arreglar el bug en la story actual antes de avanzar.
+- Después de que cada story termine, correr el **gate COMPLETO** de la story —
+  **todos los gates declarados del stack, no solo `make test`**: como mínimo
+  `make test` **Y** `make typecheck` (mypy/vue-tsc/tsc) **Y** `make lint`, **antes**
+  de empezar la siguiente. Un "verde" por story que corrió solo `pytest`+`ruff`
+  **no es verde** si se saltó el typecheck (ver "Por qué", REQ-20260731-adelanto).
+- Si CUALQUIERA de esos gates falla, arreglar el bug en la story actual antes de avanzar.
 - Esta disciplina demostró entregar ~0 retrabajo cross-story (RETRO-DD-1031-rerun), frente a un batch que acumuló "23 fallos" (RETRO-DD-1031).
 
-**Excepción**: stories puramente frontend sin cambios de backend pueden ir en batch, siempre que la verificación sea por-story.
+**Excepción**: stories puramente frontend sin cambios de backend pueden ir en batch, siempre que la verificación por-story corra igual el gate COMPLETO del frontend (lint + typecheck + test).
 
-**Por qué**: en DD-896 (FM-02), 3 bugs distintos de S1 se descubrieron en Phase 6 después de implementar las 7 stories. En DD-1031 el batch paralelo acumuló bugs de S1+S3+S4 que se propagaron por re-implementaciones. Secuencial + make-test por story detecta el bug en su origen.
+**Por qué**: en DD-896 (FM-02), 3 bugs distintos de S1 se descubrieron en Phase 6 después de implementar las 7 stories. En DD-1031 el batch paralelo acumuló bugs de S1+S3+S4 que se propagaron por re-implementaciones. En **REQ-20260731-adelanto** el gate per-story corrió `pytest`+`ruff` pero **no `mypy`**, y un BLOCKER de typecheck (`union-attr` por un `Empresa | None` sin guard, introducido en S4) sobrevivió hasta la Fase 5 de code review — habría sido 0 findings de haber corrido `make typecheck` por story. Secuencial + **gate completo** por story detecta el bug en su origen. Concuerda con "Definition of green" (`kuraka-policies.md`) y Rule T7: correr **todos** los gates declarados, nunca un subconjunto.
 
 **Estimación de ahorro**: 50-100K tokens en provider migrations (elimina la tormenta de debugging de errores acumulados).
 
@@ -278,6 +302,20 @@ requiere juicio:
   por función del `git diff` y los pasa al code/security-reviewer como tabla
   "set cambiado vs set autorizado" — la verificación de scope se vuelve un
   chequeo de tabla, no una relectura de la superficie.
+- **El entorno de la reproducción también se verifica** (la reproducción de un
+  claim solo vale si corre en un entorno fiable):
+  - Si la story tocó el manifest de dependencias, el lockfile o las migraciones,
+    la imagen/entorno de test se **reconstruye ANTES** de reproducir el gate
+    (no-cache si cambiaron migraciones). Nunca declarar verde sobre un
+    contenedor con un install efímero o una capa `COPY . .` stale (adela: dos
+    falsos verdes en un ciclo — "89 passed" con una dep ausente de la imagen;
+    guai: ~179 fallos fantasma por imagen stale).
+  - La reproducción corre en un **entorno limpio no sombreado por el host**
+    (p. ej. un `node_modules` bind-mounted del host filtra binarios de otra
+    plataforma).
+  - Una ráfaga súbita de `Can't locate revision` / `column does not exist` tras
+    tocar migraciones es una **regresión FALSA de entorno stale**: rebuild y
+    re-run, nunca "arreglar" código para satisfacer una imagen vieja.
 
 **Estimación de ahorro**: ~245K tokens por incidente evitado (el loop de
 revert 6.8 de REQ-20260703) + ~100K en relecturas de reviewers. Y es una
@@ -303,9 +341,34 @@ nada: todo el costo fue contexto re-pegado.
    `/cliente/auth/register`; ajustar AC3 y AC14 en consecuencia").
 3. La instrucción "NO releer el resto del paquete; el resto del ciclo no cambió".
 
-Target: **30–50K tokens** por re-run (vs 120–170K con contexto completo).
+**T10.a — agente NUEVO vs resume (medido, no intuitivo).** Reanudar un agente
+re-factura TODO su transcript en cada mensaje. Para deltas pequeños sobre
+archivos ya identificados, lanzá un agente NUEVO con prompt quirúrgico;
+reanudá solo cuando el razonamiento necesario vive únicamente en el transcript
+(una decisión de diseño a medio explicar, un estado exploratorio irrecuperable).
+Caso real (facturacion-honorarios): reformular UNA línea de comentario vía
+resume costó 117K; un run nuevo de 5 fixes costó 52K. Ante la duda: agente nuevo.
 
-**Estimación de ahorro**: 100–140K tokens por re-run de fase.
+**T10.b — clasificá el patch ANTES de presupuestarlo como delta.** Un delta T10
+solo es barato si es **textual y acotado** (renombrar, ajustar una AC, corregir
+una ruta). Generar código/config **normativo nuevo** (un bloque copy-this, una
+migración, un snippet de wiring) tiene presupuesto de run completo aunque llegue
+como "fix". Lotes mixtos se parten en dos runs (uno textual T10, uno generativo
+normal) — un "delta" mixto costó 281K contra un target de 30–50K.
+
+**T10.c — tiers de presupuesto:**
+
+| Tier | Alcance | Target |
+|------|---------|--------|
+| T10-S | 1 archivo, ≤3 edits textuales | 30–50K |
+| T10-M | ≤3 archivos, ≤10 findings | 90–130K |
+| T10-L | >3 archivos o cambio de contrato | T10 NO aplica — re-run de fase |
+
+Pasá solo el imperativo por finding, no las justificaciones completas. Un run
+T10-M en banda no es una violación; un T10-L disfrazado de delta sí.
+
+**Estimación de ahorro**: 100–140K tokens por re-run de fase; 60–120K por
+delta trivial que iba a resume.
 
 ---
 

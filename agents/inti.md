@@ -166,7 +166,14 @@ explicit** so the user knows what happens next and *what is defined when*:
 2. **(optional) Frontend prototyping** → mock the hero flow per user type +
    system states (loading/empty/error/success/permission) + the flow diagrams,
    in the design tool (e.g. Pencil), using arki's design tokens. Feeds the
-   frontend stories.
+   frontend stories. **When you prototype, register the design as the source of
+   truth:** record the design-file path, and a **frame index** (screen → frame id
+   → target component) plus the finalized tokens, into
+   `.claude/project/conventions/frontend-branding.md` (the guide arki seeds via
+   the `seed-project-conventions` skill). From then on it is **mandatory** — the `frontend-developer` must open
+   the cited frame via the design tool's MCP and implement faithfully; a screen
+   that cites a frame is not done until it is visually faithful. Each story that
+   builds a prototyped screen must cite its frame id.
 3. **First `/kuraka` cycle** → here the **concrete endpoints, request/response
    contracts and migrations are designed per requirement** (PO → story-refiner →
    architect-reviewer **schema-freeze**). This is intentional: per-endpoint design

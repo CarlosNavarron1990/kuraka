@@ -44,6 +44,10 @@ project's actual conventions are your source of truth.
 
 1. **Inspect report** — JSON produced by `kuraka-inspect.py` (path from user).
 2. **The project itself** — for code sampling.
+3. **Design files, if any** — a Pencil `.pen` path or Figma URL, passed in by
+   the onboarding wizard (or found in `docs/`). Register them in
+   `conventions/frontend-branding.md` (Step 5); never leave a detected design
+   unregistered — the `frontend-developer` only honors designs registered there.
 
 ## Process
 
@@ -88,6 +92,7 @@ Pick 20–30 files across the detected layers:
 | Models / schemas | 3–4 | core domain entities |
 | Tests | 3–5 | unit + integration mix |
 | Frontend components | 3–5 | a page + form + list + modal |
+| Frontend theme/tokens | 1–2 | tailwind config / theme file / CSS variables (feeds `frontend-branding.md`) |
 | Config / bootstrap | 2–3 | main entry, middleware setup |
 
 Read each. Take notes on:
@@ -146,44 +151,31 @@ Create the directory tree:
 ```
 .claude/project/
 ├── README.md                          # Explains the layer + how the team maintains it
-├── conventions/
-│   ├── architecture.md                # The actual layer pattern (Django apps / FastAPI / Rails / etc.)
-│   ├── naming.md                      # The actual naming conventions detected
-│   ├── tenant-isolation.md            # Only if multi-tenancy detected
-│   └── (other conventions per the matrix)
+├── conventions/                       # Seeded via the `seed-project-conventions` skill (see below)
 ├── review-checks/                     # Empty initially
 ├── lessons-learned/
 │   ├── INDEX.md                       # Empty index
 │   └── (LL files added per incident going forward)
-├── glossary.md                        # Domain terms detected from code/comments
+├── glossary.md                        # Domain entities + relations/states detected from models/enums/comments
 └── agents/                            # Optional override dir; created empty
 ```
 
-For each `conventions/` file you create, follow this template:
+Then execute the **`seed-project-conventions` skill in brownfield mode** —
+it is the canonical spec (shared with `arki`, so brownfield projects get the
+SAME convention surface greenfield gets) for which files to create and what
+each must contain: `architecture.md`, `naming.md`, `api-design.md` (error
+envelope, pagination, status codes — extracted from the sampled endpoints),
+`query-and-repository.md` (from the sampled repos), `frontend-branding.md`
+(tokens from the sampled theme file + registration of any design file passed
+in the Inputs, with frame-index table), `tenant-isolation.md` (if detected),
+`test-fixtures.md` (from the sampled tests), domain conventions +
+`glossary.md`.
 
-```markdown
-# {Convention title}
-
-## Context (auto-extracted from the project)
-
-This project uses: {detected pattern}
-Confidence: {HIGH | MEDIUM | LOW}
-
-## Rules
-
-{Convention text — use the project's actual vocabulary, NOT another
-project's. E.g., for Django: "apps/views/models pattern" not
-"4-layer architecture".}
-
-## Examples (sampled from this codebase)
-
-{1-2 snippets from actual files, with file:line references.}
-
-## Anti-patterns detected in the codebase
-
-{If you saw violations during sampling, list them. Don't block
-onboarding on them — flag for a future cleanup story.}
-```
+Source of truth is the **sampled code only**: every rule cites `file:line`
++ confidence from the Step 3 matrix; anything not observed is
+`<TODO: confirm with team>` — never a guess, never another project's pattern.
+Skip a file only when the concern is absent (e.g. no frontend) and say so in
+the report.
 
 ### Step 6 — Generate `docs/` skeleton
 
@@ -196,7 +188,10 @@ docs/
 ├── getting-started.md           # Setup steps from README/Makefile/package scripts
 ├── arquitectura/
 │   ├── README.md                # Index
-│   └── layers.md                # Layer diagram + rule
+│   ├── layers.md                # Layer diagram + rule
+│   ├── domain-model.md          # ER + states EXTRACTED from models/migrations/enums (see below)
+│   ├── integrations-overview.md # Only if external integrations detected (HTTP clients, queues, webhooks)
+│   └── security-model.md        # Only if auth detected — the OBSERVED auth strategy; else a TODO stub
 ├── desarrollo/
 │   ├── README.md
 │   ├── testing.md               # From detected test framework
@@ -208,6 +203,19 @@ docs/
     ├── agent-retrospectives/
     └── agent-telemetry/
 ```
+
+`docs/arquitectura/` here is the **same documentation surface `arki` produces
+for greenfield, but extracted from the existing solution** — the cycle agents
+(`po-analyst`, `story-refiner`, `architect-reviewer`) read `domain-model.md`
+and consistency-check every new schema against it, so it must reflect the
+real code:
+
+- `domain-model.md`: entities + relations from the sampled models/schemas and
+  the migration history; state machines from status enums/columns and the
+  transitions you can observe in services. Mark unobserved transitions
+  `<TODO>` — an incomplete-but-true model beats a complete-but-guessed one.
+- `integrations-overview.md`: each detected external system + direction +
+  protocol (from HTTP clients, queue producers/consumers, webhook handlers).
 
 Rules:
 

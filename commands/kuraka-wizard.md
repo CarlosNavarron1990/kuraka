@@ -57,14 +57,18 @@ lives in `.claude/project/` for **all** platforms — every agent/role reads it)
 - `.claude/project/` layer present?
 - any source files present (brownfield) or none (greenfield)? (heuristic: count
   `*.ts/js/py/go/rb/java/php/rs/vue` outside `.claude/`, `.git/`, `node_modules/`, `docs/`)
+- **any design file** (`docs/*.pen`, a Figma URL in `kuraka.config.yaml`/`docs/`)? If
+  present, it is the frontend's source of truth → `.claude/project/conventions/frontend-branding.md`
+  must register it (design-file path + frame index screen→frame + tokens). A design
+  that exists but isn't registered there is a gap the frontend agents won't honor.
 
 Apply the FIRST matching rule, act, then report and close:
 
 | # | Condition | Action |
 |---|-----------|--------|
-| A | config **and** layer both present | **Ready.** Validate if you can (`kuraka validate`), then offer the two entry points: `/kuraka <requerimiento>`, or Discovery ("tengo una idea, no un requerimiento") for a fuzzy feature. Done. |
+| A | config **and** layer both present | **Ready.** Validate if you can (`kuraka validate`). If a design file exists but `conventions/frontend-branding.md` doesn't register it (frame index + tokens), flag it as a `<TODO>` and offer to wire it — the `frontend-developer` only honors designs registered there. Then offer the two entry points: `/kuraka <requerimiento>`, or Discovery ("tengo una idea, no un requerimiento") for a fuzzy feature. Done. |
 | B | no config **and** no source files → **greenfield** | Route to `inti` (discovery), then `arki` (architecture + config). In Claude these are `/inti` and `/arki`; in Cursor/Codex/Antigravity, adopt the `inti` then `arki` role. |
-| C | no config **and** has source files → **brownfield** | Ensure the inspect report (if absent, run `kuraka inspect > inspect-report.json` or `python3 "$KURAKA_VAULT/kuraka-inspect.py" . > inspect-report.json`). Then run `amauta` (`/amauta` command or role) to generate `kuraka.config.yaml` + `.claude/project/` from the **real code** — golden rule: never invent, mark unknowns `<TODO>`. |
+| C | no config **and** has source files → **brownfield** | Ensure the inspect report (if absent, run `kuraka inspect > inspect-report.json` or `python3 "$KURAKA_VAULT/kuraka-inspect.py" . > inspect-report.json`). Then run `amauta` (`/amauta` command or role) to generate `kuraka.config.yaml` + `.claude/project/` from the **real code** — golden rule: never invent, mark unknowns `<TODO>`. **Pass amauta any design file found above** (`.pen` path / Figma URL) so it registers it in `conventions/frontend-branding.md` — amauta seeds the same convention surface arki does (api-design, query-and-repository, frontend-branding, test-fixtures…), sourced from the detected code. |
 
 ## Step 3 — Always close with one clear next step
 

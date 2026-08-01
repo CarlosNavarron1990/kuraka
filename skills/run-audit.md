@@ -29,10 +29,15 @@ The complete development cycle:
 Open the previous RETRO and its `## 6) Patches Proposed`. For each proposed
 patch, verify it was actually applied (grep the agent prompt / project-layer
 file, or confirm the file exists). Record the result as section `0)` of the new
-RETRO. A patch proposed last cycle but not landed is a Systemic Issue in this
-cycle; one that recurs un-applied across ≥2 retros is an escalating finding —
-apply it now if it is project-layer and safe. This closes the retro→apply→verify
-loop (without it, the same fixes get re-proposed forever).
+RETRO. **This is a closing gate**: a project-layer patch is applied NOW and
+verified with its declared evidence command (paste the result), or carries a
+per-patch user decline in writing — never closed silently un-applied; ≥2 retros
+un-applied = must-apply. Framework-tier patches are never applied from a
+consumer project: record them as `OPEN FRAMEWORK DEBT` with an occurrence
+counter (`proposed in N retros`) for the vault's `/kuraka-harvest` to land. An
+LL written this cycle ships its INDEX.md row in the same change (verify
+`grep -c`). This closes the retro→apply→verify loop (soft wording did not hold:
+guai 3 cycles of un-landed patches; facturacion 0/11, framework tier 0%).
 
 ### 1. Collect evidence
 

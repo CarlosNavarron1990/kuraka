@@ -52,10 +52,12 @@ AGENTS=(
   pattern-detector
   deploy-diagnostician
   provider-contract-validator
+  jira-ticket-sync
 )
 
 SKILLS=(
   facilitate-discovery
+  seed-project-conventions
   analyze-requirement
   refine-stories
   plan-tests

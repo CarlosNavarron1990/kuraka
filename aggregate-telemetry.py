@@ -56,7 +56,8 @@ def find_telemetry_files(project_root: Path) -> list[Path]:
     telemetry_dir = project_root / "docs" / "process" / "agent-telemetry"
     if not telemetry_dir.is_dir():
         return []
-    return sorted(telemetry_dir.glob("*-telemetry.json"))
+    return sorted(p for p in telemetry_dir.glob("*-telemetry.json")
+                  if not p.name.startswith("._"))  # skip macOS AppleDouble files
 
 
 def load_checkpoint_phases(project_root: Path) -> dict[str, list[str]]:
@@ -66,10 +67,12 @@ def load_checkpoint_phases(project_root: Path) -> dict[str, list[str]]:
     if not ckpt_dir.is_dir():
         return result
     for path in sorted(ckpt_dir.glob("*-state*.json")):
+        if path.name.startswith("._"):
+            continue
         try:
             with path.open() as fp:
                 data = json.load(fp)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             continue
         req = data.get("req_name")
         phases = data.get("phases_completed")
@@ -119,7 +122,7 @@ def load_cycle(path: Path) -> dict | None:
     try:
         with path.open() as fp:
             return json.load(fp)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
         print(f"[warn] cannot parse {path.name}: {exc}", file=sys.stderr)
         return None
 
@@ -154,8 +157,14 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
         runs = cycle.get("runs", [])
         tokens = sum(int(r.get("total_tokens", 0) or 0) for r in runs)
         uses = sum(int(r.get("tool_uses", 0) or 0) for r in runs)
-        ms = sum(int(r.get("duration_ms", 0) or 0) for r in runs)
-        dur = f"{ms / 1000:.1f}s" if ms < 60_000 else f"{ms / 60_000:.1f}min"
+        # null/missing durations are legitimate (multi-day combined sessions);
+        # render n/a instead of a misleading 0.0s
+        timed = [int(r["duration_ms"]) for r in runs if r.get("duration_ms")]
+        ms = sum(timed)
+        if not timed:
+            dur = "n/a"
+        else:
+            dur = f"{ms / 1000:.1f}s" if ms < 60_000 else f"{ms / 60_000:.1f}min"
         bad = sorted({
             str(r.get("status")) for r in runs
             if str(r.get("status", "ok")) in INCOMPLETE_STATUSES
@@ -173,6 +182,7 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
         "tokens": 0,
         "tool_uses": 0,
         "duration_ms": 0,
+        "timed_runs": 0,
         "over_budget": 0,
     })
 
@@ -192,7 +202,9 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
             t = int(run.get("total_tokens", 0) or 0)
             a["tokens"] += t
             a["tool_uses"] += int(run.get("tool_uses", 0) or 0)
-            a["duration_ms"] += int(run.get("duration_ms", 0) or 0)
+            if run.get("duration_ms"):
+                a["duration_ms"] += int(run["duration_ms"])
+                a["timed_runs"] += 1
 
             _target, hard_cap = BUDGETS.get(agent, (None, None))
             if hard_cap and t > hard_cap:
@@ -213,8 +225,12 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
         n = stats["invocations"]
         avg_t = stats["tokens"] / n if n else 0
         per_use = stats["tokens"] / stats["tool_uses"] if stats["tool_uses"] else 0
-        avg_dur_ms = stats["duration_ms"] / n if n else 0
-        avg_dur = f"{avg_dur_ms / 1000:.1f}s" if avg_dur_ms < 60_000 else f"{avg_dur_ms / 60_000:.1f}min"
+        # average over runs that actually recorded a duration; n/a if none did
+        if stats["timed_runs"]:
+            avg_dur_ms = stats["duration_ms"] / stats["timed_runs"]
+            avg_dur = f"{avg_dur_ms / 1000:.1f}s" if avg_dur_ms < 60_000 else f"{avg_dur_ms / 60_000:.1f}min"
+        else:
+            avg_dur = "n/a"
         over = stats["over_budget"]
         flag = f"⚠️ {over}/{n}" if over else f"0/{n}"
         lines.append(

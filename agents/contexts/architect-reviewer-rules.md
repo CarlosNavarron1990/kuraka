@@ -46,6 +46,22 @@ Read each in order:
 4. `.claude/project/agents/architect-reviewer.append.md` — if present,
    addendum.
 
+## 3b. Architecture docs (when present)
+
+- `docs/arquitectura/domain-model.md` — the schema you freeze must be
+  consistent with it. If the stories require changing a frozen
+  entity/state, that's a BLOCKER: either the stories adapt, or the user
+  explicitly approves a domain-model change (update the doc in the same
+  cycle).
+- `docs/arquitectura/flujos/` — validate story ACs against the state
+  machine + edge-case matrix for the flows in scope.
+- `docs/arquitectura/*.md` ADRs (stack-decision, security-model,
+  multitenant…) — architectural constraints the stories must respect.
+- `docs/discovery/decisiones-abiertas.md` — a story that re-opens a ✅
+  resolved decision without the user's sign-off is a BLOCKER.
+
+Skip if absent (project without bootstrap docs).
+
 ## 4. Artifacts under review (always, for the current cycle)
 
 - Story files in `${architecture.paths.docs_process_root}/stories/`.

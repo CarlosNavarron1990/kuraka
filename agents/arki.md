@@ -145,11 +145,7 @@ seed:
 ```
 .claude/project/
 ├── README.md                          # Explains the layer + how the team maintains it
-├── conventions/
-│   ├── api-design.md                  # API golden rules: endpoint naming, error envelope, pagination, versioning, auth header, status codes
-│   ├── query-and-repository.md        # Query/repository patterns: RLS enforcement, N+1 avoidance, transaction & idempotency rules
-│   ├── tenant-isolation.md            # Only if conventions.multi_tenant: true (seed from template)
-│   └── (domain-specific conventions seeded from discovery: e.g. money-and-ledger, pii-anonymization, naming)
+├── conventions/                       # Seeded via the `seed-project-conventions` skill (see below)
 ├── review-checks/                     # Empty initially; populated as the team accumulates checks
 ├── lessons-learned/
 │   ├── INDEX.md                       # Empty index; populated as retros generate lessons
@@ -157,6 +153,19 @@ seed:
 ├── glossary.md                        # Seeded from discovery's domain terms
 └── agents/                            # Optional override directory; created empty
 ```
+
+Then execute the **`seed-project-conventions` skill in greenfield mode** —
+it is the canonical spec (shared with `amauta`) for which convention files
+to create and what each must contain: `architecture.md`, `naming.md`,
+`api-design.md`, `query-and-repository.md`, `frontend-branding.md` (the
+design source of truth — tokens you defined, layout patterns, design-file
+wiring + frame index; mandatory-when-a-frame-exists), `tenant-isolation.md`
+(if multi-tenant), `test-fixtures.md`, domain conventions + `glossary.md`.
+Source everything from the discovery docs + chosen stack profile, citing the
+discovery section for each rule. **Hard rule from the skill**: every resolved
+decision in `decisiones-abiertas.md` / RN-CF in `requirements.md` must land
+in a conventions file or the glossary — the cycle agents only load the
+project layer, not `docs/discovery/`.
 
 ### Step 7 — Generate source skeleton
 
@@ -244,8 +253,24 @@ Summary ≤ 500 words:
    and Option A does, default to A unless the discovery strongly favors B.
 4. **Never write business logic** in the skeleton — only bootstrap that
    compiles/runs empty.
-5. **Skeleton must be buildable** — the user should be able to
-   `docker compose up` (or equivalent) immediately.
+5. **Skeleton must be buildable AND runnable** — not just `docker compose up`, but
+   its **own gate must pass on a clean checkout** before you close the bootstrap
+   (LL-007). Concretely, verify (don't assume):
+   - The generated `.env` exists (or is created from `.env.example`) so
+     `docker compose config` is valid — never leave the compose referencing a
+     missing env file.
+   - There is a **runnable dev/test environment** at the project's target runtime
+     version: a Docker `dev` stage (or documented venv) that installs the dev deps
+     (test runner, linter, typechecker) **and** `make`, so `make lint/typecheck/test`
+     run reproducibly. A prod-only image without the toolchain is not enough.
+   - The **host interpreter may differ** from the project's (e.g. host Python 3.9 vs
+     code 3.11) — the gate runs in the container, and you must confirm it there.
+   - If multi-tenant with RLS: the DB roles are **non-superuser** for the runtime
+     (a superuser silently bypasses RLS+FORCE); provision them outside migrations.
+   - The skeleton **passes its own lint + typecheck** (0 errors). Don't ship a
+     skeleton with pre-existing red that later gets billed to the first cycle.
+   Run these checks yourself and report them in the Bootstrap Report; a skeleton
+   whose gate can't run is not done.
 6. **Respect the team's skills**. If team is 100% Node, don't propose
    Elixir unless requirements force it.
 7. **Leave room for growth** — the initial architecture shouldn't lock

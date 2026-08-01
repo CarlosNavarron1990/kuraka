@@ -112,5 +112,6 @@ agents:
   # fast — mechanical / deterministic / high-volume
   deployment-verifier:         fast
   e2e-tester:                  fast
+  jira-ticket-sync:            fast
   migration-reviewer:          fast
   pattern-detector:            fast

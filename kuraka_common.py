@@ -156,6 +156,31 @@ def platform_dirs(project: Path) -> list[Path]:
     return dirs or [project / ".claude"]
 
 
+def suite_version(vault: Path) -> str:
+    """Current framework-suite version from <vault>/SUITE-VERSION (single line).
+    Bumped by /kuraka-harvest when core changes land; stamped into every mount
+    manifest and cycle meta so retros can be correlated per suite version."""
+    try:
+        v = (vault / "SUITE-VERSION").read_text(encoding="utf-8").strip()
+        return v or "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
+def mounted_suite_version(project: Path, platform: str = "claude") -> str:
+    """Suite version recorded in the project's mount manifest ('unknown' for
+    legacy mounts that pre-date SUITE-VERSION)."""
+    p_name = f".{platform}" if not platform.startswith(".") else platform
+    p = project / p_name / MOUNT_MANIFEST_NAME
+    if not p.is_file() and p_name != ".claude":
+        p = project / ".claude" / MOUNT_MANIFEST_NAME
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return str(data.get("suite_version") or "unknown")
+    except (json.JSONDecodeError, OSError):
+        return "unknown"
+
+
 def load_mount_manifest(project: Path, platform: str = "claude") -> dict[str, str]:
     """Vault-baseline hashes recorded at mount time ('<cat>/<rel>' -> sha256).
     Empty dict when the project pre-dates the manifest (legacy mounts)."""
@@ -191,7 +216,7 @@ def write_mount_manifest(project: Path, vault: Path,
             continue
         manifest = {k: v for k, v in manifest.items() if not k.startswith(f"{cat}/")}
         for p in sorted(src.rglob("*.md")):
-            if p.name.endswith(".append.md"):
+            if p.name.endswith(".append.md") or p.name.startswith("._"):
                 continue
             key = (Path(cat) / p.relative_to(src)).as_posix()
             manifest[key] = _file_hash(p)
@@ -199,7 +224,8 @@ def write_mount_manifest(project: Path, vault: Path,
     p_name = f".{platform}" if not platform.startswith(".") else platform
     out = project / p_name / MOUNT_MANIFEST_NAME
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"files": manifest}, indent=1, sort_keys=True) + "\n",
+    out.write_text(json.dumps({"suite_version": suite_version(vault),
+                               "files": manifest}, indent=1, sort_keys=True) + "\n",
                    encoding="utf-8")
     return count
 
@@ -256,8 +282,8 @@ def detect_overrides(project: Path, vault: Path, platform: str = "claude") -> li
         if not proj_cat.is_dir():
             continue
         for p in sorted(proj_cat.rglob("*.md")):
-            if p.name.endswith(".append.md"):
-                continue
+            if p.name.endswith(".append.md") or p.name.startswith("._"):
+                continue  # ._* = macOS AppleDouble metadata, never an override
             rel = p.relative_to(proj_cat)
             base = vault_cat / rel
             proj_hash = _file_hash(p)
@@ -318,7 +344,7 @@ def restore_overrides(vault: Path, slug: str, project: Path, platform: str = "cl
         if not src_cat.is_dir():
             continue
         for s in src_cat.rglob("*"):
-            if s.is_dir():
+            if s.is_dir() or s.name.startswith("._"):
                 continue
             rel = s.relative_to(src_cat)
             d = project / p_name / cat / rel
@@ -402,6 +428,7 @@ def archive_cycles(project: Path, vault: Path, slug: str, branch: str,
         (dest / "meta.yaml").write_text(
             f"project: {slug}\nreq: {req}\nbranch: {branch}\narchived_at: {today}\n"
             f"source_retro: {retro}\nhas_telemetry: {str(telem is not None).lower()}\n"
+            f"suite_version: \"{mounted_suite_version(project)}\"\n"
             f"verdict: \"{verdict}\"\n",
             encoding="utf-8",
         )

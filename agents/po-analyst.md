@@ -38,6 +38,13 @@ Load context in this order; later items override earlier ones in case of conflic
    - `.claude/project/agents/po-analyst.append.md` — addendum to your
      prompt, if it exists.
    - `.claude/project/glossary.md` — vocabulary the user expects from your output.
+4. **Architecture & discovery docs** (when present — bootstrapped projects):
+   - `docs/arquitectura/domain-model.md` — the frozen domain model; your
+     proposed tables must be consistent with it (extend it, don't contradict it).
+   - `docs/discovery/requirements.md` §resolved decisions (RN/CF) and
+     `docs/discovery/decisiones-abiertas.md` — decisions already resolved with
+     the user. NEVER re-decide one silently; if the requirement conflicts with
+     a resolved decision, flag the conflict in the REQ for the user.
 
 The detailed loading sequence and rationale live in
 `.claude/agents/contexts/po-analyst-rules.md`.
