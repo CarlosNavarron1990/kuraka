@@ -8,13 +8,14 @@ for this project, this pastes it back — so you continue with the full accumula
 history on the new branch.
 
 Safe by default: never overwrites an existing file in the project unless --force.
-Restores layer (.claude/project) + state (docs/process); cycles/ stay central.
+Restores layer (default: .claude/project) + state (docs/process); cycles/ stay central.
 
 Usage:
     python3 kuraka-restore.py /path/to/project            # interactive prompt
     python3 kuraka-restore.py /path/to/project --yes      # restore without asking
     python3 kuraka-restore.py /path/to/project --check    # only report what exists
     python3 kuraka-restore.py /path/to/project --force    # overwrite existing files
+    python3 kuraka-restore.py /path/to/project --layer-root .codex/project
 """
 
 from __future__ import annotations
@@ -76,10 +77,14 @@ def main() -> int:
     ap.add_argument("--name", help="slug override (default: config project.name or folder)")
     ap.add_argument("--vault", default=os.environ.get("KURAKA_VAULT", DEFAULT_VAULT))
     ap.add_argument("--docs-root", default="docs/process", help="project-relative docs/process root")
+    ap.add_argument("--layer-root", default=".claude/project",
+                    help="project-relative specialization layer (default: .claude/project)")
     ap.add_argument("--yes", "-y", action="store_true", help="restore without prompting")
     ap.add_argument("--no", action="store_true", help="never restore (report only)")
     ap.add_argument("--overrides-only", action="store_true",
                     help="only re-apply agent/skill/command overrides (always; no prompt) — used by mount")
+    ap.add_argument("--skip-overrides", action="store_true",
+                    help="do not restore platform overrides (used by Codex projection)")
     ap.add_argument("--check", action="store_true", help="only report whether history exists")
     ap.add_argument("--force", action="store_true", help="overwrite existing project files")
     args = ap.parse_args()
@@ -103,6 +108,8 @@ def main() -> int:
     # project's own agent/skill/command tunings on top of the fresh vault copy.
     # Called by mount on every run (TTY or not) — overrides must never be lost.
     if args.overrides_only:
+        if args.skip_overrides:
+            return 0
         oc = kc.restore_overrides(vault, slug, project)
         if oc:
             print(f"   ✓ overrides re-aplicados: {oc} archivo(s) (.claude/{{agents,skills,commands}}, pisando la copia del vault)")
@@ -129,18 +136,20 @@ def main() -> int:
         print("   (no se restauró — corré con --yes para confirmar sin prompt)")
         return 0
 
-    lc, ls = restore_tree(kc.layer_dir(vault, slug), project / ".claude" / "project", args.force)
+    layer_dst = project / args.layer_root
+    lc, ls = restore_tree(kc.layer_dir(vault, slug), layer_dst, args.force)
     sc, ss = restore_tree(kc.state_dir(vault, slug) / "docs-process", project / args.docs_root, args.force)
-    print(f"   layer → .claude/project/   ({lc} copiados, {ls} ya existían)")
+    print(f"   layer → {args.layer_root.rstrip('/')}/   ({lc} copiados, {ls} ya existían)")
     print(f"   state → {args.docs_root}/  ({sc} copiados, {ss} ya existían)")
     if (ls or ss) and not args.force:
         print("   nota: los que ya existían NO se pisaron — usá --force para sobrescribir.")
 
     # overrides ALWAYS win over the freshly-mounted vault copy (that's their point),
     # so they overwrite regardless of --force.
-    oc = kc.restore_overrides(vault, slug, project)
-    if oc:
-        print(f"   overrides → .claude/{{agents,skills,commands}}   ({oc} re-aplicado(s), pisando la copia del vault)")
+    if not args.skip_overrides:
+        oc = kc.restore_overrides(vault, slug, project)
+        if oc:
+            print(f"   overrides → .claude/{{agents,skills,commands}}   ({oc} re-aplicado(s), pisando la copia del vault)")
     print("")
     print(f"✅ restore de {slug} completo.")
     return 0

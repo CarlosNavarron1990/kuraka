@@ -77,6 +77,19 @@ python3 evals/runner.py --compare reports/baseline-2026-04-25.json
 4. Document `expected.json` with the literal strings the agent must emit.
 5. Run the fixture; iterate until it passes consistently.
 
+## `runs/` — reportes de `/kuraka-eval` (live-repo, no fixtures)
+
+`runs/EVAL-<agente>-<slug>-<YYYYMMDD>.md` son las corridas del comando
+`/kuraka-eval`: el agente ejecutado en sandbox contra un **proyecto real**
+(no un fixture), sus afirmaciones verificadas por muestreo, y los gaps de
+definición con id estable. Cada corrida se compara contra la anterior del
+mismo par agente+target (CERRADO / REAPARECIDO / PERSISTENTE / NUEVO →
+veredicto MEJORÓ/IGUAL/EMPEORÓ) — así se mide si un ajuste al repo central
+realmente mejoró al agente antes de distribuirlo vía `kuraka update`/`mount`.
+Frontmatter incluye `suite_version` para agrupar resultados por versión,
+igual que los retros. Complementa a los fixtures: fixtures = señal nítida y
+repetible; runs = realidad desordenada de un repo vivo.
+
 ## Out of scope
 
 - LLM determinism is not assumed. The runner is expected to run each fixture

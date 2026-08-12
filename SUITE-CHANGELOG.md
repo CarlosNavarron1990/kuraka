@@ -25,6 +25,53 @@ que con la N = la integración funcionó.
 
 ---
 
+## Sin publicar (pendiente de bump por `/kuraka-harvest`)
+
+Cambios 2026-08-01→05 — paridad de onboarding + cableado de especificaciones al
+ciclo. Origen: análisis de contrato productor→consumidor + **primer agent-eval**
+(`amauta` ejecutado en sandbox contra `kuraka-control`, 5 spot-checks
+confirmados, 14 gaps de definición recolectados). Mecánica reproducible en el
+nuevo comando `/kuraka-eval`.
+
+### Añadido
+- **`skills/seed-project-conventions.md`** — spec canónica compartida del
+  sembrado de `.claude/project/conventions/` + glossary, con modo greenfield
+  (`arki`, fuente discovery) y brownfield (`amauta`, fuente código sampleado).
+  Brownfield ahora produce la MISMA superficie que greenfield: `api-design`,
+  `query-and-repository`, `frontend-branding` (con diff obligatorio de tokens
+  diseño↔código y registro de design files aun sin extensión),
+  `test-fixtures`, dominio + glossary con relaciones. Registrada en el array
+  `SKILLS=()` de `sync-obsidian.sh`.
+- **Cableado de especificaciones al ciclo** — `po-analyst`, `story-refiner` y
+  `architect-reviewer` (agente + `contexts/*-rules.md` + `analyze-requirement`)
+  cargan `docs/arquitectura/domain-model.md`, `flujos/` y las decisiones
+  resueltas de discovery cuando existen; reabrir una decisión ✅ o contradecir
+  el domain model congelado = BLOCKER. Antes esos docs eran write-only.
+- **`amauta` genera `docs/arquitectura/` real** — `domain-model.md` (entidades/
+  estados extraídos, split permitido si no cabe en 200 LOC),
+  `integrations-overview.md`, `security-model.md`; detecta lessons-learned
+  preexistentes (no duplica registro); reporta divergencias perfil↔proyecto
+  como señal para harvest; TODO solo en campos de texto libre (enums/workflow
+  conservan el default del framework).
+- **`kuraka-wizard`** regla C pasa los design files detectados a `amauta`.
+- **`commands/kuraka-eval.md`** — el eval-loop reproducible (symlink en
+  `.claude/commands/`, en `EXPORT_SKIP`): cruza `projects/*/overrides/` como
+  señal de priorización/corroboración, ejecuta en sandbox, verifica claims,
+  y **persiste cada corrida en `evals/runs/`** comparando contra el baseline
+  anterior (CERRADO/REAPARECIDO/PERSISTENTE/NUEVO → MEJORÓ/IGUAL/EMPEORÓ).
+  Baseline inicial registrado: `EVAL-amauta-kuraka-control-20260801.md`
+  (12 fixes aplicados, 2 gaps abiertos, 1 falsa alarma).
+
+### Corregido
+- **`config-schema.{yaml,json}`** (retrocompatible, sigue `schema_version: 1`):
+  `null_syntax` amplia el enum a TS/Rust (`T | null` ya existía en dbcanvas y
+  NO validaba); `enums_for_states` acepta política
+  `always|own-vocabulary-only|never` (booleans = alias legacy);
+  `tenant_column_name` admite vacío/null cuando `multi_tenant: false` (la
+  config real de kuraka-control no validaba); nuevos opcionales
+  `paths.extra_tests_roots` (monorepo/co-located) y `paths.shared_roots`
+  (seam de contratos; cambios ahí = cambio de contrato).
+
 ## [1.1.0] — 2026-08-01 (primer harvest)
 
 ### Añadido

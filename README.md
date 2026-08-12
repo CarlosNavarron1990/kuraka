@@ -271,7 +271,7 @@ te ofrece re-pegarla — así no se pierde nada aunque nunca subas Kuraka a git.
 | `mount-kuraka.sh` | Wrapper Unix delgado → `kuraka-mount.py` (mantiene el entrypoint `bash mount-kuraka.sh`) |
 | `kuraka-backup.py` | Snapshot del estado Kuraka del proyecto → store central (`layer`+`state`+`cycles`, etiqueta rama) |
 | `kuraka-restore.py` | Restaura la historia del central → proyecto (pregunta; no pisa sin `--force`) |
-| `kuraka-export.py` | Genera `AGENTS.md` + comandos «/» nativos (`.cursor/commands`, `.agent/workflows`, `.codex/prompts`) para Codex/Cursor/Antigravity (`kuraka mount --target …`) |
+| `kuraka-export.py` | Genera `AGENTS.md` + entrypoints nativos (`.cursor/commands`, `.agent/workflows`, `.codex/skills`) para Codex/Cursor/Antigravity (`kuraka mount --target …`) |
 | `kuraka-archive.py` | Archiva solo los diagnósticos de ciclo (wrapper cycles-only de backup) |
 | `kuraka-discover.py` | Descubre proyectos montados en disco y reconcilia el registro |
 | `validate-kuraka.sh` | Valida frontmatter de agentes/skills + refs huérfanas |
@@ -419,8 +419,9 @@ hace falta recordarlos.
 | `/kuraka-backup` | **Acomoda el proyecto al store central**: snapshotea su estado Kuraka completo (`layer`+`state`+`cycles`+`overrides`) a `projects/<slug>/` del vault. Correr tras `/kuraka-update`; Phase 7 lo corre solo en cada cierre. |
 | `/kuraka` | Orquesta un ciclo de desarrollo completo para un requerimiento dado. |
 
-Estos mismos comandos se exportan a **Codex / Cursor / Antigravity** (ver más
-abajo), donde se invocan igual con `/` (en Codex, `/prompts:<nombre>`).
+Estos mismos workflows se exportan a **Codex / Cursor / Antigravity** (ver más
+abajo). Cursor y Antigravity usan `/nombre`; Codex usa `$nombre` o el selector
+`/skills` porque su `/` directo está reservado a comandos internos.
 
 > **Importante**: tras `/kuraka-update` (o cualquier mount) hay que reiniciar
 > Claude Code (`/exit` + sesión nueva) — agentes, skills y commands se
@@ -504,32 +505,33 @@ entornos, `mount` genera la versión **portable** del workflow vía `AGENTS.md` 
 estándar que leen Codex, Cursor, Antigravity, Gemini CLI…):
 
 ```bash
-kuraka mount --target codex        # AGENTS.md + comandos «/» en .codex/prompts/ (staging)
+kuraka mount --target codex        # AGENTS.md + agentes nativos + workflows en .codex/skills/
 kuraka mount --target cursor       # AGENTS.md + .cursor/rules/kuraka.mdc + .cursor/commands/
 kuraka mount --target antigravity  # Montaje completo en .agents/ (agentes, skills, reglas) + .agent/workflows/ (comandos «/»)
 kuraka mount                        # (default) Claude Code → .claude/ completo
 ```
 
-Además del `AGENTS.md`, cada target recibe los **comandos «/» nativos** del vault,
-convertidos al mecanismo de cada herramienta:
+Además del `AGENTS.md`, cada target recibe los entrypoints del vault convertidos
+al mecanismo soportado por la herramienta:
 
 | Tool | Comandos en | Se invocan con | Nota |
 |---|---|---|---|
 | Cursor | `.cursor/commands/*.md` | `/nombre` | por-repo, listo tras montar |
 | Antigravity | `.agent/workflows/*.md` y `.agents/` | `/nombre` | por-repo; montaje completo de agentes y skills |
-| Codex | `.codex/prompts/*.md` (staging) | `/prompts:nombre` | Codex los lee de tu **home**: `cp .codex/prompts/*.md ~/.codex/prompts/` |
+| Codex | `.codex/skills/<nombre>/SKILL.md` | `$nombre` o `/skills` | por-repo, listo tras montar y abrir una sesión nueva; `/nombre` no admite aliases locales |
 
 Se exportan todos menos los específicos de sie_v2 (`clean-cases`, `lint`,
 `run-tests`) y el `sync-from-vault` (solo Claude). El mount imprime al final el
 **catálogo de comandos** disponibles y la **guía de inicio** de tu entorno.
 
 Qué porta y qué no:
-- **Porta** (como guía): la disciplina de 8 fases con gates, los no-negociables
-  (observar contratos, schema freeze, "green = lint+typecheck+test", green ≠
-  working), las convenciones del stack, cada agente convertido en un **rol** que
-  el agente único adopta por fase, y los comandos «/».
-- **No porta**: el *fan-out automático* de subagentes (es propio del tool `Task`
-  de Claude Code). En esos entornos los roles se invocan manualmente.
+- **Codex porta** agentes nativos, skills, effort por rol, gates y delegación
+  secuencial. Los subagentes heredan el modelo activo de la sesión para evitar
+  incompatibilidades de overrides por agente. El entrypoint principal es
+  `$kuraka <requerimiento>`.
+- **Cursor y Antigravity portan como guía** la disciplina, los gates, las
+  convenciones y sus workflows `/`; su capacidad de delegación depende de cada
+  herramienta.
 - **RTK** sí funciona en todos (Cursor, Codex, Gemini CLI…): corré su `rtk init`
   y el ahorro de tokens aplica igual.
 
@@ -623,4 +625,13 @@ Uso personal. Compartible con el equipo bajo acuerdo.
 
 ---
 
-*Last synced (docs): 2026-07-24 — RETRO-REQ-20260724-admin-rbac-visibility-refinements (GuaiHome Cycle 5).*
+*Last synced (docs): 2026-08-05 — RETRO-REQ-20260804-audit-columns (GuaiHome). Framework
+patches from that audit, propagable vía `kuraka-update`: `rules/17` T1.1 ítem (e) —
+citas del REQ con marca `[VERIFICADO]`/`[SIN VERIFICAR]`/`[ASUNCIÓN]`, y las marcadas no
+se re-verifican; `skills/kuraka-policies.md` — el cap de `tool_uses` pasa a ser ACCIÓN
+medida (escalera 1.0×/2.0×/3.0× + campo `tool_uses_ok`), y la telemetría gana
+`resumed` + `tokens_incremental` para agentes reanudados; `skills/kuraka.md` — la Fase
+3.9 registra `baseline_migration_head` + `baseline_git_head` y los re-chequea a coste 0
+antes de interpretar cada gate; `aggregate-telemetry.py` — nuevo `effective_tokens()`,
+el dashboard suma incrementales cuando existen (evita el +37% de inflación por resumes).
+Anterior: 2026-07-24 — RETRO-REQ-20260724-admin-rbac-visibility-refinements (Cycle 5).*

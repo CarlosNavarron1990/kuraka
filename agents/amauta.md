@@ -80,6 +80,11 @@ Express, React were absent), STOP and either author a profile from `_template.md
 or flag the gap to the user — running cycles without a profile means conventions
 reach subagents only via fragile manual injection.
 
+When the profile exists but the project **contradicts** one of its invariants
+(different bootstrap layout, different test tooling, …), the project wins
+(Rule 2) — but list each profile↔project divergence in your Step 7 report:
+they are exactly the signal `/kuraka-harvest` needs to improve the profiles.
+
 ### Step 2 — Sample representative code
 
 Pick 20–30 files across the detected layers:
@@ -142,7 +147,18 @@ Fill in based on the inspect report + convention matrix:
   framework defaults.
 
 If a convention is LOW or MEDIUM confidence, write the field as
-`<TODO: confirm with team>` and surface it in the report.
+`<TODO: confirm with team>` and surface it in the report — but ONLY in
+free-text fields. **Enum/boolean fields and `workflow.*` (process
+preferences, not derivable from code by definition) keep the framework
+default from the template and get listed in the report's TODO table
+instead** — a placeholder inside an enum breaks validation and every agent
+that reads the config.
+
+For monorepos / co-located test layouts, use the schema's
+`architecture.paths.extra_tests_roots` (every location holding tests beyond
+the primary root) and `architecture.paths.shared_roots` (load-bearing roots
+like a `packages/contracts/` API seam) — don't force a single misleading
+`tests_root` or bury a critical root in a comment.
 
 ### Step 5 — Generate `.claude/project/` layer
 
@@ -154,7 +170,10 @@ Create the directory tree:
 ├── conventions/                       # Seeded via the `seed-project-conventions` skill (see below)
 ├── review-checks/                     # Empty initially
 ├── lessons-learned/
-│   ├── INDEX.md                       # Empty index
+│   ├── INDEX.md                       # Index — BEFORE seeding it empty, search the repo
+│   │                                  # for a pre-existing lessons record (docs/**/lessons*,
+│   │                                  # LL-NNN references in code/comments). If one exists,
+│   │                                  # link or migrate it — never create a second registry.
 │   └── (LL files added per incident going forward)
 ├── glossary.md                        # Domain entities + relations/states detected from models/enums/comments
 └── agents/                            # Optional override dir; created empty
@@ -222,7 +241,9 @@ Rules:
 - **Don't fabricate facts**. If you can't detect auth strategy from
   code, write "TODO: document auth approach" — don't guess.
 - **Cite file:line** for every non-trivial claim.
-- **Keep each doc ≤ 200 LOC**.
+- **Keep each doc ≤ 200 LOC** — except `domain-model.md`: if the domain
+  doesn't fit, split it (`domain-model.md` + `state-machines.md`) rather
+  than truncating entities or transitions.
 
 ### Step 7 — Present to user for approval
 

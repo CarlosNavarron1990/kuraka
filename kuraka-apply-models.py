@@ -6,13 +6,11 @@ Reads MODEL-ROUTING.yaml (next to this script), validates it against the real
 agents/*.md files, and rewrites each agent's frontmatter `model:` line to the
 model its tier resolves to on the target platform.
 
-Only the `claude` platform is machine-applied: Claude Code subagents take a
-per-agent `model:` field in frontmatter, so there is a real target to write.
-The non-Claude platforms (antigravity, cursor, codex) don't take a per-subagent
-model — the export drops the field and the user picks a model in-tool — so their
-columns are recommendations surfaced elsewhere (AGENTS.md role table), not
-written here. `--platform` is accepted for forward-compat but only `claude`
-mutates files today.
+Only the `claude` platform is machine-applied to source frontmatter. Codex
+models are consumed by `kuraka-mount.py` while it renders native
+`.codex/agents/*.toml`; this script reports that mapping without modifying
+Claude-source Markdown. Antigravity and Cursor retain recommendation-only
+columns surfaced in their exported role tables.
 
 Usage:
     python3 kuraka-apply-models.py                # apply the claude column
@@ -182,11 +180,19 @@ def main() -> None:
         sys.exit(1)
 
     if args.platform != "claude":
-        print(f"ℹ️  platform '{args.platform}' is a recommendation-only column "
-              f"(non-Claude tools pick their own model); nothing written. "
-              f"Its mapping is surfaced in the exported AGENTS.md role table.")
-        # still report what it WOULD map to, for visibility
-        args.check = True
+        column = routing["platforms"].get(args.platform, {})
+        if not column:
+            _fail(f"platform '{args.platform}' has no routing column")
+        print(f"ℹ️  platform '{args.platform}' does not modify Claude-source Markdown.")
+        for stem in sorted(files):
+            tier = routing["agents"][stem]
+            print(f"  {stem:<32} {tier:<10} -> {column.get(tier, '<missing>')}")
+        if args.platform == "codex":
+            print("   Codex values are emitted into .codex/agents/*.toml by kuraka-mount.py.")
+        else:
+            print("   This platform uses the mapping as a role-table recommendation.")
+        print("✅ check complete.")
+        return
 
     changed = apply(routing, files, args.platform, check_only=args.check)
     if args.check and changed:

@@ -144,7 +144,29 @@ architecture:
   paths:
     backend_root: backend/                          # required if stack.backend present
     frontend_root: frontend/                        # required if stack.frontend present
+
+    # Primary test root. In monorepos or co-located layouts (tests next to
+    # source, e.g. *.test.ts alongside the module), point this at the root the
+    # main test runner is invoked from, and list the OTHER locations in
+    # extra_tests_roots — never pick a directory that contains no application
+    # tests just because it is named tests/.
     tests_root: tests/                              # required
+
+    # Optional. Additional directories containing tests when a single root
+    # can't describe the layout (monorepo packages, co-located suites,
+    # a separate structural/eval harness). Agents writing or validating tests
+    # must consider every root listed here.
+    # extra_tests_roots:
+    #   - backend/src/          # co-located *.test.ts
+    #   - frontend/tests/
+
+    # Optional. Load-bearing roots that are neither backend nor frontend but
+    # that stories routinely touch — typically a shared contracts/types
+    # package in a monorepo (the API seam). Agents treat changes here as
+    # contract changes (schema-freeze applies).
+    # shared_roots:
+    #   - packages/contracts/
+
     migrations_root: backend/alembic/versions/      # required if database.migration_tool set
     docs_process_root: docs/process/                # required. REQs, stories, retros
 
@@ -158,9 +180,17 @@ conventions:
   # Agents flag identifiers in another language as findings.
   naming_language: english      # english | spanish | other
 
-  # How nullable types are written.
-  #   "T | None"   — modern Python (3.10+), modern TypeScript, Rust, Kotlin
-  #   "Optional[T]" — legacy Python (≤3.9 typing module style)
+  # How nullable types are written. Pick the literal your stack uses:
+  #   "T | None"      — modern Python (3.10+)
+  #   "Optional[T]"   — legacy Python (≤3.9 typing module style)
+  #   "T | null"      — TypeScript union with null
+  #   "T | undefined" — TypeScript union with undefined
+  #   "Option<T>"     — Rust
+  #   "other"         — anything else; document it in the project layer
+  # If the project distinguishes richer cases (e.g. TS `field?: T` vs
+  # `field: T | null` mean different things), this scalar can't express that —
+  # put the full rule in .claude/project/conventions/ and set the dominant
+  # literal here.
   null_syntax: "T | None"
 
   # If true, agents require a tenant scope column in every query against
@@ -171,8 +201,17 @@ conventions:
   # Common values: tenant_id, org_id, account_id, workspace_id, customer_id.
   tenant_column_name: tenant_id
 
-  # If true, agents flag magic strings used as states/types and require enums.
-  enums_for_states: true
+  # When agents should flag magic strings used as states/types and require enums.
+  #   always               — every state/type vocabulary must be an enum
+  #                          (legacy boolean `true` means this)
+  #   own-vocabulary-only  — enums only for vocabularies THIS app owns; values
+  #                          that mirror an external system stay strings with a
+  #                          fallback, so a new upstream value can't break
+  #                          parsing (e.g. kuraka-control's LL-008)
+  #   never                — don't enforce enums
+  #                          (legacy boolean `false` means this)
+  # Booleans remain valid for backward compatibility.
+  enums_for_states: always
 
   # File and function size limits (lines of code, including comments and blanks).
   # Agents flag files/functions exceeding these as IMPORTANT or BLOCKER.
@@ -186,6 +225,12 @@ conventions:
 
 # -----------------------------------------------------------------------------
 # workflow — orchestrator behavior
+#
+# These are PROCESS PREFERENCES — by definition not derivable from code.
+# Brownfield onboarding (amauta) must keep the framework defaults shown here
+# and list them in its report for the user to review; it must NEVER write a
+# <TODO> placeholder into these fields (they are enums/booleans — a
+# placeholder breaks validation and every agent that reads the config).
 # -----------------------------------------------------------------------------
 workflow:
 

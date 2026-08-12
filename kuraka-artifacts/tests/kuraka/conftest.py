@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 
-VALID_MODELS = {"opus", "sonnet", "haiku"}
+VALID_MODELS = {"fable", "opus", "sonnet", "haiku"}
 
 
 @pytest.fixture(scope="session")
@@ -18,7 +18,10 @@ def repo_root() -> Path:
 
 @pytest.fixture(scope="session")
 def claude_dir(repo_root: Path) -> Path:
-    return repo_root / ".claude"
+    path = repo_root / ".claude"
+    if not path.is_dir():
+        pytest.skip("Claude structural checks apply only to a Claude mount")
+    return path
 
 
 @pytest.fixture(scope="session")

@@ -108,6 +108,11 @@ def compute_telemetry_debt(cycle: dict, checkpoint_phases: list[str] | None) -> 
             debts.append(f"phase {phase} · {agent}: missing/zero tool_uses on a {tokens:,}-token run")
         if not run.get("duration_ms"):
             debts.append(f"phase {phase} · {agent}: missing/zero duration_ms on a {tokens:,}-token run")
+        if run.get("resumed") and run.get("tokens_incremental") is None:
+            debts.append(
+                f"phase {phase} · {agent}: resumed run without tokens_incremental "
+                f"({tokens:,} is the cumulative transcript, not the delta's cost)"
+            )
     if checkpoint_phases:
         for phase in checkpoint_phases:
             base = phase.split("-")[0]  # "3.9-preflight" -> "3.9"
@@ -116,6 +121,22 @@ def compute_telemetry_debt(cycle: dict, checkpoint_phases: list[str] | None) -> 
             if phase not in seen_phases and base not in seen_phases:
                 debts.append(f"checkpoint says phase {phase} completed but no telemetry entry exists (orchestrator-direct or missing?)")
     return debts
+
+
+def effective_tokens(run: dict) -> int:
+    """Compute spend for a run, correcting for RESUMED agents.
+
+    A resumed agent (SendMessage / continue) reports the CUMULATIVE tokens of its
+    whole transcript, not the tokens the delta actually cost. Summing those inflates
+    the cycle: REQ-20260804-audit-columns reports 2,729,123 tokens while the real
+    incremental spend is ~1,985,000 (+37%), because 4 of 15 runs are resumes.
+
+    When the orchestrator records `resumed: true` + `tokens_incremental`, that value
+    is authoritative for aggregation. Otherwise fall back to `total_tokens`.
+    """
+    if run.get("resumed") and run.get("tokens_incremental") is not None:
+        return int(run.get("tokens_incremental") or 0)
+    return int(run.get("total_tokens", 0) or 0)
 
 
 def load_cycle(path: Path) -> dict | None:
@@ -155,7 +176,7 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
         name = cycle.get("req_name", "(unknown)")
         mode = cycle.get("mode", "—")
         runs = cycle.get("runs", [])
-        tokens = sum(int(r.get("total_tokens", 0) or 0) for r in runs)
+        tokens = sum(effective_tokens(r) for r in runs)
         uses = sum(int(r.get("tool_uses", 0) or 0) for r in runs)
         # null/missing durations are legitimate (multi-day combined sessions);
         # render n/a instead of a misleading 0.0s
@@ -199,7 +220,7 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
             agent = run.get("agent", "(unknown)")
             a = per_agent[agent]
             a["invocations"] += 1
-            t = int(run.get("total_tokens", 0) or 0)
+            t = effective_tokens(run)
             a["tokens"] += t
             a["tool_uses"] += int(run.get("tool_uses", 0) or 0)
             if run.get("duration_ms"):

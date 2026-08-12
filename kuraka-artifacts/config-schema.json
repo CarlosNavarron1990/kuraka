@@ -158,8 +158,21 @@
               "pattern": "^[^/].*/$"
             },
             "tests_root": {
+              "description": "Primary test root (where the main runner is invoked from). For co-located/monorepo layouts, list additional locations in extra_tests_roots.",
               "type": "string",
               "pattern": "^[^/].*/$"
+            },
+            "extra_tests_roots": {
+              "description": "Optional. Additional directories containing tests (monorepo packages, co-located suites, eval harnesses).",
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[^/].*/$" },
+              "uniqueItems": true
+            },
+            "shared_roots": {
+              "description": "Optional. Load-bearing roots that are neither backend nor frontend (e.g. a shared contracts package — the API seam). Changes here are contract changes.",
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[^/].*/$" },
+              "uniqueItems": true
             },
             "migrations_root": {
               "description": "Required if stack.database.migration_tool is set.",
@@ -186,16 +199,23 @@
           "enum": ["english", "spanish", "other"]
         },
         "null_syntax": {
+          "description": "The nullable-type literal the stack uses. Richer per-case rules live in .claude/project/conventions/.",
           "type": "string",
-          "enum": ["T | None", "Optional[T]"]
+          "enum": ["T | None", "Optional[T]", "T | null", "T | undefined", "Option<T>", "other"]
         },
         "multi_tenant": { "type": "boolean" },
         "tenant_column_name": {
-          "description": "Column name used for tenant scoping. Required when multi_tenant is true.",
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_]*$"
+          "description": "Column name used for tenant scoping. Required (non-empty) when multi_tenant is true; empty string or null are valid when multi_tenant is false.",
+          "type": ["string", "null"],
+          "pattern": "^([a-z][a-z0-9_]*)?$"
         },
-        "enums_for_states": { "type": "boolean" },
+        "enums_for_states": {
+          "description": "Enum-enforcement policy. Booleans are legacy aliases: true = always, false = never.",
+          "anyOf": [
+            { "type": "boolean" },
+            { "type": "string", "enum": ["always", "own-vocabulary-only", "never"] }
+          ]
+        },
         "max_file_loc": {
           "type": "integer",
           "minimum": 50,

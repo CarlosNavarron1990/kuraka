@@ -92,6 +92,16 @@ custom agents worth adopting, **proposes** integrations (user approves per item 
 NEVER auto-apply agent changes), then applies + bumps the version + updates the
 changelog. Version bumps happen ONLY through this flow.
 
+`/kuraka-eval` (vault-only, `commands/kuraka-eval.md`, also symlinked) is the
+complementary loop: it executes an agent definition in a SANDBOX against a real
+registered project (target repo read-only, outputs to scratchpad), verifies the
+agent's claims against the real code by spot-check, and collects the
+"GAPS DE LA DEFINICIÓN" the agent itself reports — then proposes fixes (per-item
+approval, changes recorded under "Sin publicar" in the changelog; the bump still
+belongs to harvest). Harvest learns from what projects tuned; eval learns from
+running the current definition and seeing where it creaks. First run (2026-08):
+`amauta` vs kuraka-control → seed-project-conventions parity + config-schema fixes.
+
 ## Architecture — what lives where, and why
 
 ### The vault layout mirrors `.claude/` in consumer projects

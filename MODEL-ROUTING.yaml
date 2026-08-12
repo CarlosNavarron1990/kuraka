@@ -47,13 +47,11 @@ tiers:
 #            (fable | opus | sonnet | haiku | best | opusplan | opus[1m] |
 #             sonnet[1m] | inherit | a full model id like claude-opus-5).
 #
-#   Non-Claude platforms (antigravity, cursor, codex): these tools DON'T take a
-#   per-subagent model field — the Kuraka export drops `model:` and the user
-#   picks a model in the tool's own UI. So these columns are a RECOMMENDATION
-#   surfaced in the exported AGENTS.md role table ("for this role, select a
-#   model of at least this capability"), not something written to a frontmatter.
-#   Fill them with the real model names as you confirm each platform's catalog;
-#   `<user-selected>` means "no fixed mapping — user's chosen model applies".
+#   Antigravity and Cursor use these columns as recommendations surfaced in the
+#   exported role table. Codex custom agents can receive a `model`, but Kuraka
+#   omits it while its value is a `<placeholder>` so the agent inherits the
+#   user's valid local Codex model. Once a concrete model is verified for the
+#   deployment, replace that placeholder and the Codex renderer emits it.
 # -----------------------------------------------------------------------------
 platforms:
   claude:
@@ -74,11 +72,14 @@ platforms:
     balanced: "<user-selected: balanced>"
     fast:     "<user-selected: fast>"
 
-  codex:                  # OpenAI Codex CLI — confirm exact names
-    frontier: "<most-capable available>"
-    heavy:    "<most-capable available>"
-    balanced: "<balanced model>"
-    fast:     "<fast model>"
+  # Codex custom agents inherit the session model by default. Pinning a model
+  # per agent can be rejected by a user's Codex integration even when the name
+  # is valid; only replace `inherit` after validating that exact override.
+  codex:
+    frontier: inherit
+    heavy:    inherit
+    balanced: inherit
+    fast:     inherit
 
 # -----------------------------------------------------------------------------
 # agents — every agents/*.md stem MUST appear here exactly once. The apply
@@ -114,4 +115,5 @@ agents:
   e2e-tester:                  fast
   jira-ticket-sync:            fast
   migration-reviewer:          fast
+  migration-deployability:     balanced
   pattern-detector:            fast

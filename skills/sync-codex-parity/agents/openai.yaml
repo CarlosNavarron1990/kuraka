@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sync Codex Parity"
+  short_description: "Keep Kuraka Codex behavior aligned with Claude sources."
+  default_prompt: "Synchronize Kuraka Codex support after changes to Claude-source agents, skills, commands, rules, or routing, while preserving Claude and Antigravity behavior."

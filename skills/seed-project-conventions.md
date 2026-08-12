@@ -53,13 +53,21 @@ The design source of truth the `frontend-developer` reads for every UI story:
 
 - **Design tokens** (palette, typography, spacing, radii). Greenfield: the
   tokens arki defines. Brownfield: extracted from the theme/tailwind/tokens
-  file if one exists; otherwise `<TODO>`.
+  file if one exists; otherwise `<TODO>`. **When BOTH a design file and a
+  code tokens file exist, diff them token-by-token and report the drift**
+  (mismatched values, tokens defined in the design but absent in code — those
+  fail silently at runtime). The drift table goes in this file; resolving it
+  is a user decision, not yours.
 - **Layout patterns** (app-shell, nav, form/table patterns) at a high level.
 - **Design-file wiring**: if a design file exists (Pencil `.pen`, Figma URL —
   including one passed in by the onboarding wizard), record its **path/URL**,
   how to read it (for `.pen`: the Pencil MCP, never `Read`/`Grep`), and a
   **frame index** table (screen → frame id → target component; leave rows
-  `<TODO>` if unmapped). State explicitly: **when a design/frame exists it is
+  `<TODO>` if unmapped). Detect design files by **content, not just
+  extension** — an extensionless/renamed export still counts; note the real
+  format next to the path. Frames with no implemented screen yet are backlog,
+  not noise: register them as `<TODO (not built)>` rows so future UI stories
+  can cite them. State explicitly: **when a design/frame exists it is
   mandatory** — a UI screen citing a frame is not done until visually faithful.
 - If NO design file exists: still create the file with the tokens + the note
   "no design file yet — frontend uses these branding defaults; when a design

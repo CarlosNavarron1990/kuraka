@@ -18,6 +18,7 @@ Usage:  python3 kuraka-mount.py [target_dir] [--target claude|antigravity|cursor
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from fnmatch import fnmatch
@@ -124,6 +125,20 @@ def count_top(dstdir: Path) -> int:
     return sum(1 for p in dstdir.iterdir() if p.is_file() and p.suffix in (".md", ".sh"))
 
 
+def count_codex_skills(dstdir: Path) -> int:
+    """Number of discoverable project-local Codex skills."""
+    if not dstdir.is_dir():
+        return 0
+    return sum(1 for p in dstdir.iterdir() if p.is_dir() and (p / "SKILL.md").is_file())
+
+
+def count_codex_agents(dstdir: Path) -> int:
+    """Number of native Codex custom agent definitions."""
+    if not dstdir.is_dir():
+        return 0
+    return sum(1 for p in dstdir.glob("*.toml") if p.is_file())
+
+
 def _excluded(rel: Path, exclude: tuple[str, ...]) -> bool:
     return any(fnmatch(part, pat) for part in rel.parts for pat in exclude)
 
@@ -149,14 +164,17 @@ def copy_file(src: Path, dst: Path, target_env: str = "claude") -> None:
     if not src.is_file():
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if target_env == "antigravity" and src.suffix == ".md":
+    if target_env in ("antigravity", "codex") and src.suffix == ".md":
         text = src.read_text(encoding="utf-8", errors="ignore")
-        text = text.replace(".claude/skills/", ".agents/skills/")
-        text = text.replace(".claude/rules/", ".agents/rules/")
-        text = text.replace(".claude/agents/", ".agents/agents/")
-        text = text.replace(".claude/project/", ".agents/project/")
-        text = text.replace(".claude/stack-profiles/", ".agents/stack-profiles/")
-        text = text.replace(".claude/templates/", ".agents/templates/")
+        if target_env == "antigravity":
+            text = text.replace(".claude/skills/", ".agents/skills/")
+            text = text.replace(".claude/rules/", ".agents/rules/")
+            text = text.replace(".claude/agents/", ".agents/agents/")
+            text = text.replace(".claude/project/", ".agents/project/")
+            text = text.replace(".claude/stack-profiles/", ".agents/stack-profiles/")
+            text = text.replace(".claude/templates/", ".agents/templates/")
+        elif target_env == "codex":
+            text = adapt_codex_paths(text)
         dst.write_text(text, encoding="utf-8")
     else:
         shutil.copy2(src, dst)
@@ -181,6 +199,277 @@ def sync_antigravity_skills(src_skills: Path, dst_skills: Path) -> int:
     return count
 
 
+def _codex_skill_text(name: str, description: str, body: str, source_kind: str) -> str:
+    """Render a Codex-native SKILL.md. Codex discovers project-local skills only
+    from .codex/skills/<name>/SKILL.md, so vault skills and Kuraka agents are
+    normalized into that shape for the Codex target."""
+    description = adapt_codex_paths(description)
+    body = adapt_codex_paths(body)
+    platform_override = ""
+    if name in {"kuraka", "kuraka-policies"}:
+        platform_override = """## Codex Platform Override
+
+This override takes precedence over Claude-specific wording below. When the
+workflow says to invoke an agent, delegate to the matching native custom agent
+in `.codex/agents/<name>.toml`, wait for its structured handoff, and apply the
+gate before the next phase. The orchestrator never adopts a specialist role.
+
+Codex may not expose Claude's `<usage>` block. Keep the telemetry file and
+record phase, agent, attempt, timestamps, status, and produced artifacts.
+Record unavailable token, tool-use, or duration values as `null` or `unknown`;
+never fabricate `0`. Missing optional usage metrics do not block a gate.
+
+"""
+    return (
+        "---\n"
+        f"name: {name}\n"
+        f'description: "{description}"\n'
+        "---\n\n"
+        f"> Kuraka Codex {source_kind}. Loaded from this project via `.codex/skills/{name}/SKILL.md`.\n\n"
+        f"{platform_override}"
+        f"{body.lstrip()}"
+    )
+
+
+def _frontmatter_and_body(path: Path) -> tuple[dict[str, str], str]:
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    fm: dict[str, str] = {}
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            block = text[3:end]
+            body = text[end + 4:].lstrip("\n")
+            for raw in block.splitlines():
+                if ":" not in raw:
+                    continue
+                k, _, v = raw.partition(":")
+                fm[k.strip()] = v.strip().strip('"').strip("'")
+            return fm, body
+    return fm, text
+
+
+def adapt_codex_paths(text: str) -> str:
+    """Translate Claude paths and command mentions to the Codex projection.
+
+    Root Markdown skills become SKILL.md directories in Codex, so convert the
+    common explicit `.md` references before applying the broader replacements.
+    """
+    import re
+
+    text = re.sub(
+        r"\.claude/skills/([A-Za-z0-9_-]+)\.md",
+        r".codex/skills/\1/SKILL.md",
+        text,
+    )
+    text = (text.replace(".claude/skills/", ".codex/skills/")
+                .replace(".claude/rules/", ".codex/rules/")
+                .replace(".claude/agents/", ".codex/agents/")
+                .replace(".claude/project/", ".codex/project/")
+                .replace(".claude/stack-profiles/", ".codex/stack-profiles/")
+                .replace(".claude/templates/", ".codex/templates/")
+                .replace(".claude/", ".codex/")
+                .replace("Requires a Claude Code restart afterward.",
+                         "Requires a new Codex session afterward."))
+    text = text.replace(
+        'kuraka-backup.py" <project-root>',
+        'kuraka-backup.py" <project-root> --layer-root .codex/project --skip-overrides',
+    )
+    command_names = (
+        "checkmarx-remediation", "kuraka-wizard", "kuraka-backup",
+        "kuraka-update", "kuraka", "amauta", "inti", "arki",
+    )
+    for name in command_names:
+        text = text.replace(f"/prompts:{name}", f"${name}")
+        text = re.sub(
+            rf"(?<![A-Za-z0-9_.$/])/{re.escape(name)}(?![A-Za-z0-9_.-])",
+            f"${name}",
+            text,
+        )
+    return text
+
+
+def sync_codex_skills(src_skills: Path, dst_skills: Path) -> int:
+    """Sync only reusable Kuraka skills as Codex-native project skills.
+
+    Agent roles are rendered separately to `.codex/agents/*.toml`; publishing
+    them as skills duplicates the catalog and prevents native delegation.
+    """
+    dst_skills.mkdir(parents=True, exist_ok=True)
+    count = 0
+
+    if src_skills.is_dir():
+        for p in sorted(src_skills.glob("*.md")):
+            if p.name.endswith(".append.md"):
+                continue
+            fm, body = _frontmatter_and_body(p)
+            name = fm.get("name") or p.stem
+            desc = fm.get("description") or f"Kuraka workflow skill: {name}"
+            skill_dir = dst_skills / name
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(_codex_skill_text(name, desc, body, "skill"), encoding="utf-8")
+            count += 1
+        for d in src_skills.iterdir():
+            if d.is_dir():
+                sync_tree(d, dst_skills / d.name, target_env="codex")
+
+    return count
+
+
+CODEX_REASONING_EFFORT = {
+    "frontier": "high",
+    "heavy": "high",
+    "balanced": "medium",
+    "fast": "low",
+}
+
+CODEX_READ_ONLY_AGENTS = {
+    "architect-reviewer",
+    "code-reviewer",
+    "security-reviewer",
+    "final-auditor",
+    "migration-reviewer",
+    "pattern-detector",
+}
+
+
+def read_codex_agent_settings(vault: Path) -> dict[str, tuple[str | None, str]]:
+    """Resolve Codex model settings from MODEL-ROUTING.yaml without PyYAML.
+
+    A placeholder such as `<most-capable available>` intentionally omits the
+    `model` key so the custom agent inherits the user's valid Codex model.
+    """
+    routing = vault / "MODEL-ROUTING.yaml"
+    if not routing.is_file():
+        return {}
+    agent_tiers: dict[str, str] = {}
+    codex_models: dict[str, str] = {}
+    section = ""
+    platform = ""
+    for raw in routing.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        line = raw.strip().split(" #", 1)[0].strip()
+        if ":" not in line:
+            continue
+        key, _, value = line.partition(":")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if indent == 0:
+            section = key
+            platform = ""
+        elif section == "agents":
+            agent_tiers[key] = value
+        elif section == "platforms" and indent == 2:
+            platform = key
+        elif section == "platforms" and platform == "codex" and indent >= 4:
+            codex_models[key] = value
+
+    settings: dict[str, tuple[str | None, str]] = {}
+    for name, tier in agent_tiers.items():
+        model = codex_models.get(tier)
+        if model and (model.startswith("<") or model == "inherit"):
+            model = None
+        settings[name] = (model, CODEX_REASONING_EFFORT.get(tier, "medium"))
+    return settings
+
+
+def _toml_multiline_literal(text: str) -> str:
+    """Encode instructions as a TOML multiline literal string."""
+    if "'''" in text:
+        raise ValueError("Codex agent source contains unsupported TOML literal delimiter")
+    return "'''\n" + text.rstrip() + "\n'''"
+
+
+def render_codex_agent_toml(name: str, description: str, body: str,
+                             model: str | None, reasoning_effort: str,
+                             sandbox_mode: str) -> str:
+    """Render a native Codex custom agent from a Claude-source agent body."""
+    instructions = f"""# Kuraka Codex Agent Contract
+
+You are the `{name}` subagent in a gated Kuraka workflow. Work only on the
+phase and inputs supplied by the orchestrator. Do not advance phases, invoke
+other Kuraka agents, or request approval from the user directly.
+
+Load the referenced skills, project layer, stack profile, rules, and output
+schema before acting. Preserve evidence with file paths and run only the
+validation appropriate to this phase.
+
+Return exactly one handoff status:
+- `DONE`: list produced or inspected artifacts and validation evidence.
+- `CLARIFY`: state the blocking question and why it prevents a valid output.
+- `BLOCKED`: state the missing dependency or failed precondition.
+- `VALIDATION_FAILED`: state the failed check and affected artifacts.
+
+The orchestrator owns checkpoints, telemetry, phase gates, user interaction,
+and final decisions. Never invent unavailable usage metrics; report them as
+`unknown` when requested.
+
+--- Source role instructions ---
+
+{adapt_codex_paths(body)}
+"""
+    lines = [
+        f"name = {json.dumps(name)}",
+        f"description = {json.dumps(adapt_codex_paths(description))}",
+    ]
+    if model:
+        lines.append(f"model = {json.dumps(model)}")
+    lines.extend([
+        f"model_reasoning_effort = {json.dumps(reasoning_effort)}",
+        f"sandbox_mode = {json.dumps(sandbox_mode)}",
+        f"developer_instructions = {_toml_multiline_literal(instructions)}",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def sync_codex_agents(src_agents: Path, dst_agents: Path, vault: Path) -> int:
+    """Compile Claude-source Markdown agents to native Codex TOML agents."""
+    dst_agents.mkdir(parents=True, exist_ok=True)
+    settings = read_codex_agent_settings(vault)
+    count = 0
+    for source in sorted(src_agents.glob("*.md")):
+        fm, body = _frontmatter_and_body(source)
+        name = fm.get("name") or source.stem
+        description = fm.get("description") or f"Kuraka specialist agent: {name}."
+        model, effort = settings.get(name, (None, "medium"))
+        sandbox = "read-only" if name in CODEX_READ_ONLY_AGENTS else "workspace-write"
+        rendered = render_codex_agent_toml(name, description, body, model, effort, sandbox)
+        (dst_agents / f"{name}.toml").write_text(rendered, encoding="utf-8")
+        count += 1
+    return count
+
+
+def ensure_codex_agent_config(config_path: Path) -> bool:
+    """Add Kuraka's safe concurrency default without replacing user config."""
+    key = "max_concurrent_threads_per_session"
+    default = f"{key} = 4"
+    if not config_path.exists():
+        config_path.write_text("[agents]\n" + default + "\n", encoding="utf-8")
+        return True
+
+    lines = config_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    section_start = None
+    section_end = len(lines)
+    for index, line in enumerate(lines):
+        if line.strip() == "[agents]":
+            section_start = index
+            continue
+        if section_start is not None and line.strip().startswith("["):
+            section_end = index
+            break
+    if section_start is None:
+        suffix = "\n" if lines else ""
+        config_path.write_text("\n".join(lines) + suffix + "\n[agents]\n" + default + "\n", encoding="utf-8")
+        return True
+    if any(line.strip().startswith(key + " =") for line in lines[section_start + 1:section_end]):
+        return False
+    lines.insert(section_end, default)
+    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return True
+
+
 # ------------------------------------------------------------------------- main
 
 def main() -> int:
@@ -191,6 +480,10 @@ def main() -> int:
     target_env = "claude"
 
     args_list = sys.argv[1:]
+    if any(arg in ("-h", "--help") for arg in args_list):
+        print("Usage: python3 kuraka-mount.py [target_dir] [--target claude|antigravity|cursor|codex]")
+        print("Mount Kuraka framework artifacts into a consumer project.")
+        return 0
     i = 0
     while i < len(args_list):
         a = args_list[i]
@@ -234,6 +527,8 @@ def main() -> int:
         platform_dir = target / ".claude"
 
     platform_dir.mkdir(parents=True, exist_ok=True)
+    if target_env == "codex" and ensure_codex_agent_config(platform_dir / "config.toml"):
+        print("   ✓ .codex/config.toml: límite de 4 subagentes concurrentes")
 
     selected = {"agents", "skills", "commands", "rules", "artifacts"}
     menu_mode = "all"
@@ -280,7 +575,7 @@ def main() -> int:
         return cat in selected
 
     # pre-flight: snapshot local overrides BEFORE the copy overwrites them.
-    if (platform_dir / "agents").is_dir():
+    if target_env != "codex" and (platform_dir / "agents").is_dir():
         if run_py("kuraka-backup.py", str(target), "--overrides-only", quiet=True) == 0:
             print("   ✓ overrides locales respaldados al store central (pre-mount)")
             print("")
@@ -294,13 +589,33 @@ def main() -> int:
         src = VAULT / category
         dst = platform_dir / category
         if src.is_dir():
+            if target_env == "codex" and category == "commands":
+                # kuraka-export.py compiles command entrypoints to project-local
+                # Codex skills. Current Codex does not discover .codex/commands
+                # or .codex/prompts as custom slash commands.
+                print("   → commands/  (se compilarán como skills Codex)")
+                continue
             dst.mkdir(parents=True, exist_ok=True)
-            before = count_top(dst)
+            if target_env == "codex" and category == "agents":
+                before = count_codex_agents(dst)
+            elif target_env == "codex" and category == "skills":
+                before = count_codex_skills(dst)
+            else:
+                before = count_top(dst)
             if category == "skills" and target_env == "antigravity":
                 sync_antigravity_skills(src, dst)
+            elif category == "skills" and target_env == "codex":
+                sync_codex_skills(src, dst)
+            elif category == "agents" and target_env == "codex":
+                sync_codex_agents(src, dst, VAULT)
             else:
                 sync_tree(src, dst, exclude=("*.append.md",), target_env=target_env)
-            after = count_top(dst)
+            if target_env == "codex" and category == "agents":
+                after = count_codex_agents(dst)
+            elif target_env == "codex" and category == "skills":
+                after = count_codex_skills(dst)
+            else:
+                after = count_top(dst)
             delta = after - before
             if delta > 0:
                 print(f"   + {category}/  ({delta} new, {after} total)")
@@ -320,7 +635,7 @@ def main() -> int:
                      "18-duplication-aware-refactor.md", "19-evidence.md"):
             src = VAULT / "rules" / rule
             if src.is_file():
-                copy_file(src, platform_dir / "rules" / rule)
+                copy_file(src, platform_dir / "rules" / rule, target_env=target_env)
                 print(f"   ✓ rules/{rule}")
 
     # framework-level artifacts outside platform_dir
@@ -341,12 +656,12 @@ def main() -> int:
                       exclude=(".pytest_cache", "__pycache__"))
             print("   ✓ tests/kuraka/")
         if (artifacts / "stack-profiles").is_dir():
-            sync_tree(artifacts / "stack-profiles", platform_dir / "stack-profiles")
+            sync_tree(artifacts / "stack-profiles", platform_dir / "stack-profiles", target_env=target_env)
             if target_env == "antigravity":
                 sync_tree(artifacts / "stack-profiles", target / ".claude" / "stack-profiles")
             print("   ✓ stack-profiles/")
         if (artifacts / "templates").is_dir():
-            sync_tree(artifacts / "templates", platform_dir / "templates")
+            sync_tree(artifacts / "templates", platform_dir / "templates", target_env=target_env)
             if target_env == "antigravity":
                 sync_tree(artifacts / "templates", target / ".claude" / "templates")
             print("   ✓ templates/")
@@ -366,7 +681,8 @@ def main() -> int:
         print("   ⚠ kuraka_common.py not found — mount manifest skipped")
 
     # re-apply project-specific overrides
-    run_py("kuraka-restore.py", str(target), "--overrides-only")
+    if target_env != "codex":
+        run_py("kuraka-restore.py", str(target), "--overrides-only")
 
     # --- ensure .gitignore excludes personal content ---
     gitignore = target / ".gitignore"
@@ -382,6 +698,24 @@ def main() -> int:
             ".agents/rules/19-evidence.md",
             ".agents/.kuraka-mount-manifest.json",
             ".agent/workflows/",
+            "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
+            "docs/process/agent-telemetry/*.json",
+            "# Tool scratch dirs (never track)",
+            ".playwright-mcp/",
+            ".pytest_cache/",
+        ]
+    elif target_env == "codex":
+        patterns = [
+            "# Kuraka framework files (versioned externally; not source of this repo)",
+            ".codex/agents/",
+            ".codex/skills/",
+            ".codex/commands/",
+            ".codex/prompts/",
+            ".codex/rules/16-agent-backup.md",
+            ".codex/rules/17-kuraka-token-optimizations.md",
+            ".codex/rules/18-duplication-aware-refactor.md",
+            ".codex/rules/19-evidence.md",
+            ".codex/.kuraka-mount-manifest.json",
             "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
             "docs/process/agent-telemetry/*.json",
             "# Tool scratch dirs (never track)",
@@ -427,12 +761,16 @@ def main() -> int:
 
     # offer to restore Kuraka history
     if (VAULT / "kuraka-restore.py").exists():
+        restore_layer_args = (("--layer-root", ".codex/project", "--skip-overrides")
+                              if target_env == "codex" else ())
         if tty:
-            run_py("kuraka-restore.py", str(target))
+            run_py("kuraka-restore.py", str(target), *restore_layer_args)
         else:
             run_py("kuraka-restore.py", str(target), "--check")
             print("   ℹ️  Para restaurar la historia (si la hay):")
-            print(f'      python3 "{VAULT / "kuraka-restore.py"}" "{target}"   # pregunta antes de pegar')
+            layer_hint = (' --layer-root .codex/project --skip-overrides'
+                          if target_env == "codex" else '')
+            print(f'      python3 "{VAULT / "kuraka-restore.py"}" "{target}"{layer_hint}   # pregunta antes de pegar')
         print("")
 
     # auto-seed from a pre-populated migration-example layer
@@ -496,7 +834,7 @@ def main() -> int:
     elif target_env == "cursor":
         cmd_dir = target / ".cursor" / "commands"
     elif target_env == "codex":
-        cmd_dir = target / ".codex" / "prompts"
+        cmd_dir = target / ".codex" / "skills"
     else:
         cmd_dir = target / ".claude" / "commands"
 
@@ -505,8 +843,12 @@ def main() -> int:
     print("📋 NOTAS DEL MONTAJE:")
     print("")
     print("  • Unstage cualquier fichero personal ya indexado en git:")
-    print(f"     git restore --staged {platform_dir.name}/agents/ {platform_dir.name}/skills/ {platform_dir.name}/commands/ 2>/dev/null || true")
-    print(f"     git restore --staged {platform_dir.name}/rules/16-agent-backup.md {platform_dir.name}/rules/17-kuraka-token-optimizations.md 2>/dev/null || true")
+    if target_env == "codex":
+        print("     git restore --staged .codex/agents/ .codex/skills/ 2>/dev/null || true")
+        print("     git restore --staged .codex/rules/16-agent-backup.md .codex/rules/17-kuraka-token-optimizations.md 2>/dev/null || true")
+    else:
+        print(f"     git restore --staged {platform_dir.name}/agents/ {platform_dir.name}/skills/ {platform_dir.name}/commands/ 2>/dev/null || true")
+        print(f"     git restore --staged {platform_dir.name}/rules/16-agent-backup.md {platform_dir.name}/rules/17-kuraka-token-optimizations.md 2>/dev/null || true")
     print("")
     if synced_agents:
         print(f"  • Agentes sincronizados en {platform_dir.name}/.")

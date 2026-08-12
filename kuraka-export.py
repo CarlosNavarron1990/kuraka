@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """kuraka-export.py — render the Kuraka workflow as portable instructions for
-non-Claude-Code AI tools (Codex, Cursor, Antigravity) via AGENTS.md
-(+ .cursor/rules for Cursor).
+non-Claude-Code AI tools (Codex, Cursor, Antigravity) via AGENTS.md and each
+platform's native reusable-workflow surface.
 
 Why: Claude Code gets the full multi-subagent orchestration (mount-kuraka.sh).
-Other tools don't spawn isolated subagents, so here each Kuraka agent becomes a
-ROLE/persona the single agent adopts per phase, and the 8-phase discipline plus
-the non-negotiable rules become a checklist in one instruction file every
-AGENTS.md-aware tool reads.
+Codex also supports native custom agents, so its export delegates to rendered
+`.codex/agents/*.toml` definitions. Cursor and Antigravity retain the portable
+single-thread role checklist.
 
 Invoked via:  kuraka mount --target codex|cursor|antigravity  [dir]
 """
@@ -15,6 +14,7 @@ Invoked via:  kuraka mount --target codex|cursor|antigravity  [dir]
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -29,15 +29,19 @@ TARGETS = ("codex", "cursor", "antigravity")
 # never exported to other tools. sync-from-vault is a Claude-only vault→project
 # migration. kuraka-wizard IS exported: it is platform-aware (detects the tool it's
 # running in and checks the mount for THAT platform), so it works in every environment.
-EXPORT_SKIP = {"clean-cases", "lint", "run-tests", "sync-from-vault", "kuraka-harvest"}
+EXPORT_SKIP = {"clean-cases", "lint", "run-tests", "sync-from-vault", "kuraka-harvest", "kuraka-eval"}
 
-# Where each tool reads its slash-commands from, and how it invokes them.
+# Cursor and Antigravity expose command files directly. Current Codex releases
+# discover project workflows as skills instead (explicitly via `$name` or
+# `/skills`), so Codex is handled separately in export_codex_command_skills().
 TARGET_CMD_DIR = {
     "cursor": (".cursor", "commands"),
     "antigravity": (".agent", "workflows"),
-    "codex": (".codex", "prompts"),       # staged; user copies to ~/.codex/prompts
 }
 ANTIGRAVITY_MAX = 12000  # per-workflow character limit
+CODEX_COMMAND_MARKER = "<!-- kuraka-codex-command-skill -->"
+CODEX_ENTRYPOINT_START = "<!-- kuraka-codex-entrypoint:start -->"
+CODEX_ENTRYPOINT_END = "<!-- kuraka-codex-entrypoint:end -->"
 
 # Curated short labels + arg hints for the post-mount catalog (single source of
 # truth for how commands are advertised). Unknown commands fall back to their
@@ -57,6 +61,7 @@ CMD_LABEL = {
     "checkmarx-remediation": ("", "Remediación Checkmarx: tickets SAST/SCA/API → informe + checklist"),
     "sync-from-vault": ("", "(solo Claude) migra agents/skills/commands del vault al proyecto"),
 }
+CODEX_COMMAND_NAMES = tuple(sorted(CMD_LABEL, key=len, reverse=True))
 
 
 def err(m: str) -> None:
@@ -78,6 +83,36 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
                     fm[m.group(1)] = m.group(2)
             return fm, body
     return fm, text
+
+
+def adapt_codex_paths(text: str) -> str:
+    """Translate Claude paths and command mentions to the Codex projection."""
+    text = re.sub(
+        r"\.claude/skills/([A-Za-z0-9_-]+)\.md",
+        r".codex/skills/\1/SKILL.md",
+        text,
+    )
+    text = (text.replace(".claude/skills/", ".codex/skills/")
+                .replace(".claude/rules/", ".codex/rules/")
+                .replace(".claude/agents/", ".codex/agents/")
+                .replace(".claude/project/", ".codex/project/")
+                .replace(".claude/stack-profiles/", ".codex/stack-profiles/")
+                .replace(".claude/templates/", ".codex/templates/")
+                .replace(".claude/", ".codex/")
+                .replace("Requires a Claude Code restart afterward.",
+                         "Requires a new Codex session afterward."))
+    text = text.replace(
+        'kuraka-backup.py" <project-root>',
+        'kuraka-backup.py" <project-root> --layer-root .codex/project --skip-overrides',
+    )
+    for name in CODEX_COMMAND_NAMES:
+        text = text.replace(f"/prompts:{name}", f"${name}")
+        text = re.sub(
+            rf"(?<![A-Za-z0-9_.$/])/{re.escape(name)}(?![A-Za-z0-9_.-])",
+            f"${name}",
+            text,
+        )
+    return text
 
 
 def command_desc(path: Path) -> str:
@@ -175,14 +210,24 @@ def _g(cfg: dict, *keys: str, default: str = "—") -> str:
 
 def render_agents_md(project: Path, slug: str, cfg: dict, agents: list[tuple[str, str]],
                      agent_tiers: dict[str, str] | None = None,
-                     tier_meanings: dict[str, str] | None = None) -> str:
+                     tier_meanings: dict[str, str] | None = None,
+                     target: str = "codex") -> str:
     backend = _g(cfg, "stack.backend.framework", "stack.backend.language")
     frontend = _g(cfg, "stack.frontend.framework")
     lang = _g(cfg, "conventions.naming_language", default="english")
     tenant = _g(cfg, "conventions.multi_tenant", default="false")
     maxf = _g(cfg, "conventions.max_file_loc", default="—")
     maxfn = _g(cfg, "conventions.max_function_loc", default="—")
-    has_layer = (project / ".claude" / "project").is_dir()
+    project_layer_dir = ".codex/project" if target == "codex" else ".claude/project"
+    skills_dir = ".codex/skills" if target == "codex" else ".claude/skills"
+    agents_dir = ".codex/agents" if target == "codex" else ".claude/agents"
+    has_layer = ((project / ".codex" / "project").is_dir() or (project / ".claude" / "project").is_dir()) \
+        if target == "codex" else (project / ".claude" / "project").is_dir()
+
+    if target == "codex":
+        def adapt_role_description(text: str) -> str:
+            return adapt_codex_paths(text)
+        agents = [(name, adapt_role_description(description)) for name, description in agents]
 
     agent_tiers = agent_tiers or {}
     tier_meanings = tier_meanings or {}
@@ -215,17 +260,29 @@ def render_agents_md(project: Path, slug: str, cfg: dict, agents: list[tuple[str
 > Antigravity and any other AGENTS.md-aware tool.
 
 You are working in a project governed by **Kuraka**, a disciplined development
-workflow. Other tools spawn one agent, not many — so **you adopt the relevant
-*role* below per phase** and follow the gated 8-phase flow as a checklist.
+workflow. {"Act as the orchestrator: delegate each phase to the native Codex agent named below, wait for its handoff, then run the gate before continuing." if target == "codex" else "Adopt the relevant role below per phase and follow the gated 8-phase flow as a checklist."}
 
 ## Stack
 
 - Backend: **{backend}**  ·  Frontend: **{frontend}**
 - Naming language: `{lang}`  ·  multi-tenant: `{tenant}`
 - Max file LOC: `{maxf}`  ·  max function LOC: `{maxfn}`
-- Full config: `kuraka.config.yaml`. {"Project-specific conventions, lessons-learned and review-checks live in `.claude/project/` — READ THEM FIRST." if has_layer else "No `.claude/project/` layer yet — run onboarding (amauta) to extract conventions."}
+- Full config: `kuraka.config.yaml`. {f"Project-specific conventions, lessons-learned and review-checks live in `{project_layer_dir}/` — READ THEM FIRST." if has_layer else f"No `{project_layer_dir}/` layer yet — run onboarding (amauta) to extract conventions."}
 
-## How to work here — the 8-phase discipline
+{f'''## Codex/Kuraka Artifacts
+
+- Native Kuraka skills are available under `{skills_dir}/<name>/SKILL.md`.
+- Native Kuraka agents are available under `{agents_dir}/<name>.toml`.
+- Start the main workflow with `$kuraka <requirement>` or select `kuraka` from
+  `/skills`. Codex reserves direct slash commands for its own command set.
+- Invoke the named agent sequentially for each phase; pass phase, approved input
+  artifact, required skill, allowed paths, and expected output. Wait for its
+  `DONE`, `CLARIFY`, `BLOCKED`, or `VALIDATION_FAILED` handoff before any gate.
+- Never implement, review, or approve a phase by adopting a specialist role in
+  the orchestrator thread. Parallel delegation requires an explicit plan proving
+  independent files and a merge order.
+
+''' if target == "codex" else ""}## How to work here — the 8-phase discipline
 
 Run a change through these phases. Each has a **gate**: do not advance until it
 passes. Scale down (skip phases) only for trivial changes, and say which you skip.
@@ -262,7 +319,7 @@ passes. Scale down (skip phases) only for trivial changes, and say which you ski
   declaring done; distinguish empty-state from broken-state.
 - **User approval between phases** — do not auto-advance through gates.
 
-## Roles (adopt the mindset per phase)
+## Roles ({"delegate by native agent name" if target == "codex" else "adopt the mindset per phase"})
 
 {roles_header}
 {roles}
@@ -275,7 +332,7 @@ cross-checks) use `rtk proxy <cmd>` so no field is truncated.
 
 ## Project specifics
 
-{"Read `.claude/project/conventions/*.md`, `.claude/project/lessons-learned/*.md` and `.claude/project/review-checks/*.md` — they override the generic guidance above." if has_layer else "Run the onboarding (amauta) to generate `.claude/project/` with this project's real conventions."}
+{f"Read `{project_layer_dir}/conventions/*.md`, `{project_layer_dir}/lessons-learned/*.md` and `{project_layer_dir}/review-checks/*.md` — they override the generic guidance above." if has_layer else f"Run the onboarding (amauta) to generate `{project_layer_dir}/` with this project's real conventions."}
 """
 
 
@@ -310,6 +367,14 @@ def _preamble(target: str) -> str:
             "> 3. No te detengas ni abandones el ciclo a mitad de camino; avanza rol por rol hasta completar la auditoría final y el archivado.\n"
             "> 4. Consultá las convenciones en `.agents/project/` o `.claude/project/`, y los skills en `.agents/skills/` o `.claude/skills/`.\n\n"
         )
+    if target == "codex":
+        return (
+            "> **Kuraka — entorno Codex.** Usá `$kuraka` y las skills locales de\n"
+            "> `.codex/skills/`. Cuando el flujo requiera un especialista, delegá al\n"
+            "> custom agent nativo `.codex/agents/<nombre>.toml`; no adoptes su rol en\n"
+            "> el hilo orquestador. Esperá su handoff y aplicá el gate antes de continuar.\n"
+            "> Las convenciones locales viven en `.codex/project/`.\n\n"
+        )
     return (
         f"> **Kuraka — entorno {target}.** Este entorno no lanza subagentes aislados\n"
         f"> como Claude Code. Cuando un paso pida \"invocar el subagente X\", **adoptá\n"
@@ -325,16 +390,7 @@ def transform_command(name: str, text: str, target: str) -> str:
     desc = fm.get("description") or command_desc_from_body(body)
     arg_hint = fm.get("argument-hint", "")
 
-    if name == "kuraka-update":
-        body = (
-            "# Actualizar Kuraka en este proyecto\n\n"
-            f"En {target}, refrescá el framework (AGENTS.md + comandos) re-corriendo\n"
-            f"el mount desde tu solución:\n\n"
-            "```bash\n"
-            f"kuraka mount --target {target}\n"
-            "```\n\n"
-            "Eso regenera AGENTS.md y los comandos de este entorno desde el vault.\n"
-        )
+    body = command_body_for_target(name, body, target)
 
     # argument placeholder: codex substitutes $ARGUMENTS natively; others don't.
     if target != "codex":
@@ -347,6 +403,10 @@ def transform_command(name: str, text: str, target: str) -> str:
         body = body.replace(".claude/agents/", ".agents/agents/")
         body = body.replace(".claude/project/", ".agents/project/")
         body = body.replace(".claude/stack-profiles/", ".agents/stack-profiles/")
+    elif target == "codex":
+        # Adapt paths from Claude's native layout to Codex's project-local layout.
+        desc = adapt_codex_paths(desc)
+        body = adapt_codex_paths(body)
 
     body = _preamble(target) + body
 
@@ -367,12 +427,201 @@ def command_desc_from_body(body: str) -> str:
     return ""
 
 
+def command_body_for_target(name: str, body: str, target: str) -> str:
+    """Return target-specific command content before platform adaptation."""
+    if name != "kuraka-update":
+        return body
+    noun = "skills" if target == "codex" else "comandos"
+    return (
+        "# Actualizar Kuraka en este proyecto\n\n"
+        f"En {target}, refrescá el framework (AGENTS.md + {noun}) re-corriendo\n"
+        "el mount desde tu solución:\n\n"
+        "```bash\n"
+        f"kuraka mount --target {target}\n"
+        "```\n\n"
+        f"Eso regenera AGENTS.md y los {noun} de este entorno desde el vault.\n"
+    )
+
+
+def adapt_codex_command_semantics(name: str, body: str) -> str:
+    """Replace Claude-only execution wording in Codex command entrypoints."""
+    body = re.sub(
+        r"\(Task tool, `subagent_type: ([A-Za-z0-9_-]+)`\)",
+        r"(native Codex custom agent from `.codex/agents/\1.toml`)",
+        body,
+    )
+    replacements = {
+        "If the Task call fails": "If Codex delegation fails",
+        "Si la Task falla": "Si la delegación de Codex falla",
+        "restart Claude Code (`/exit` + new session)": "start a new Codex session",
+        "restart Claude Code\n(`/exit` + new session)": "start a new Codex session",
+        "reinicie Claude Code (`/exit` + sesión nueva)": "abra una sesión nueva de Codex",
+        "subagents register only at session start": "the mounted agent catalog reloads at session start",
+        "los subagentes se registran solo al iniciar sesión": "el catálogo de agentes se recarga al iniciar la sesión",
+    }
+    for old, new in replacements.items():
+        body = body.replace(old, new)
+
+    if name == "kuraka-wizard":
+        wizard_replacements = {
+            "| under `.claude/commands/`, and `.claude/agents/` exists | **Claude Code** |":
+                "| under Claude's native command directory, with its native agents present | **Claude Code** |",
+            "| Claude Code | `.claude/agents/` (18 .md), `.claude/commands/`, `.claude/skills/` | `kuraka mount`  (elegí Claude) | restart Claude Code: `/exit` + new session (subagents register only at start) |":
+                "| Claude Code | native Claude agents, commands and skills | `kuraka mount` (elegí Claude) | restart Claude Code: `/exit` + new session |",
+            "| invoked as `/prompts:…` from `~/.codex/prompts/`, `AGENTS.md` exists | **Codex** |":
+                "| selected from `/skills` or mentioned as `$kuraka-wizard`, `AGENTS.md` + `.codex/skills/` exist | **Codex** |",
+            "| Codex | `AGENTS.md`, and prompts in `~/.codex/prompts/` | `kuraka mount --target codex` (luego copiá `.codex/prompts/*.md` → `~/.codex/prompts/`) | reabrí `codex` |":
+                "| Codex | `AGENTS.md`, `.codex/agents/`, `.codex/skills/` | `kuraka mount --target codex` | abrí una sesión nueva de Codex |",
+            "differently — Claude Code uses native subagents under `.claude/`; the others adopt\nroles via `AGENTS.md` + native slash-commands.":
+                "differently — Claude Code and Codex use native subagents; Cursor and\nAntigravity use their own workspace workflow surfaces.",
+            "Once the platform mount is OK, check the project's Kuraka config (the project layer\nlives in `.claude/project/` for **all** platforms — every agent/role reads it):":
+                "Once the platform mount is OK, check the project's Kuraka config. In this\nCodex projection, every native agent reads the layer from `.codex/project/`:",
+            "In Claude these are `/inti` and `/arki`; in Cursor/Codex/Antigravity, adopt the `inti` then `arki` role.":
+                "In Codex invoke `$inti` and then `$arki`; each workflow delegates to its native custom agent.",
+            "A Cursor mount has no\n  `.claude/agents/` and that's correct; its \"mount\" is `AGENTS.md` + `.cursor/commands/`.":
+                "A Codex mount has `.codex/agents/` and `.codex/skills/`; absence of `.claude/` is expected.",
+        }
+        for old, new in wizard_replacements.items():
+            body = body.replace(old, new)
+    elif name == "kuraka-backup":
+        body = body.replace(
+            'python3 "$VAULT/kuraka-backup.py" "$PROJECT_ROOT"',
+            'python3 "$VAULT/kuraka-backup.py" "$PROJECT_ROOT" '
+            '--layer-root .codex/project --skip-overrides',
+        )
+    return body
+
+
+def _codex_command_body(name: str, body: str) -> str:
+    """Adapt a legacy command body to Codex's explicit skill invocation.
+
+    Skills receive the complete user request; Codex does not substitute the
+    legacy custom-prompt `$ARGUMENTS` placeholder.
+    """
+    argument_text = (
+        f"the text in the current user request after the `${name}` skill mention"
+    )
+    body = command_body_for_target(name, body, "codex")
+    body = adapt_codex_command_semantics(name, body)
+    body = adapt_codex_paths(body)
+    return body.replace("$ARGUMENTS", argument_text)
+
+
+def render_codex_command_skill(name: str, text: str) -> str:
+    """Compile a Claude-source command to a project-local Codex skill."""
+    fm, body = parse_frontmatter(text)
+    desc = adapt_codex_paths(
+        fm.get("description") or command_desc_from_body(body)
+        or f"Run the Kuraka {name} workflow."
+    )
+    invocation = (
+        f"Select `{name}` from `/skills` or mention `${name}` in the prompt. "
+        f"Treat text after `${name}` as this workflow's arguments."
+    )
+    return (
+        "---\n"
+        f"name: {name}\n"
+        f"description: {json.dumps(desc, ensure_ascii=False)}\n"
+        "---\n\n"
+        f"{CODEX_COMMAND_MARKER}\n"
+        f"# Kuraka command: {name}\n\n"
+        f"> Generated from `commands/{name}.md`. {invocation}\n\n"
+        f"{_preamble('codex')}"
+        f"{_codex_command_body(name, body).lstrip()}"
+    )
+
+
+def add_codex_entrypoint(skill_path: Path, name: str) -> None:
+    """Add an idempotent explicit-invocation block to a canonical vault skill."""
+    text = skill_path.read_text(encoding="utf-8", errors="ignore")
+    if CODEX_ENTRYPOINT_START in text:
+        before, _, tail = text.partition(CODEX_ENTRYPOINT_START)
+        _, separator, after = tail.partition(CODEX_ENTRYPOINT_END)
+        text = before.rstrip() + ("\n\n" + after.lstrip() if separator else "")
+    block = f"""{CODEX_ENTRYPOINT_START}
+## Codex explicit invocation
+
+Select `{name}` from `/skills` or mention `${name}` in the prompt. Treat any
+text after `${name}` in the current user request as the workflow input. Direct
+`/{name}` is not a custom command surface in Codex.
+{CODEX_ENTRYPOINT_END}"""
+    skill_path.write_text(text.rstrip() + "\n\n" + block + "\n", encoding="utf-8")
+
+
+def _is_vault_skill(vault: Path, name: str) -> bool:
+    return ((vault / "skills" / f"{name}.md").is_file()
+            or (vault / "skills" / name / "SKILL.md").is_file())
+
+
+def cleanup_generated_codex_command_files(project: Path) -> int:
+    """Remove only legacy prompt/command files carrying Kuraka's generator mark."""
+    removed = 0
+    generated = re.compile(r"> \*\*Kuraka — entorno [Cc]odex\.")
+    for root in (project / ".codex" / "prompts", project / ".codex" / "commands"):
+        if not root.is_dir():
+            continue
+        for path in root.glob("*.md"):
+            content = path.read_text(encoding="utf-8", errors="ignore")
+            if generated.search(content):
+                path.unlink()
+                removed += 1
+    return removed
+
+
+def export_codex_command_skills(vault: Path, project: Path,
+                                quiet: bool = False) -> int:
+    """Compile user-facing Kuraka commands to discoverable Codex skills.
+
+    A command whose name already belongs to a canonical vault skill (currently
+    `kuraka`) augments that skill with invocation guidance instead of replacing
+    its authoritative body. Unrelated project-authored skills are preserved.
+    """
+    src_dir = vault / "commands"
+    dst_root = project / ".codex" / "skills"
+    dst_root.mkdir(parents=True, exist_ok=True)
+    exported = 0
+    preserved = 0
+
+    for source in sorted(src_dir.glob("*.md")):
+        name = source.stem
+        if name in EXPORT_SKIP:
+            continue
+        skill_path = dst_root / name / "SKILL.md"
+        if skill_path.is_file() and _is_vault_skill(vault, name):
+            add_codex_entrypoint(skill_path, name)
+            exported += 1
+            continue
+        if skill_path.is_file():
+            existing = skill_path.read_text(encoding="utf-8", errors="ignore")
+            if CODEX_COMMAND_MARKER not in existing:
+                preserved += 1
+                if not quiet:
+                    print(f"   ⚠️  ${name}: skill local existente preservada; comando Kuraka no la reemplazó")
+                continue
+        skill_path.parent.mkdir(parents=True, exist_ok=True)
+        rendered = render_codex_command_skill(
+            name, source.read_text(encoding="utf-8", errors="ignore")
+        )
+        skill_path.write_text(rendered, encoding="utf-8")
+        exported += 1
+
+    removed = cleanup_generated_codex_command_files(project)
+    if not quiet:
+        print(f"   + {exported} comandos Codex → .codex/skills/<nombre>/SKILL.md")
+        if preserved:
+            print(f"   ℹ️  {preserved} skills locales preservadas por colisión de nombre")
+        if removed:
+            print(f"   ✓ {removed} prompts/comandos Codex obsoletos retirados")
+    return exported
+
+
 def export_commands(vault: Path, project: Path, target: str, quiet: bool = False) -> int:
-    """Render vault/commands/*.md as native slash-commands for `target`. Returns
-    the number exported."""
+    """Render vault commands on the target's native workflow surface."""
     src_dir = vault / "commands"
     if not src_dir.is_dir():
         return 0
+    if target == "codex":
+        return export_codex_command_skills(vault, project, quiet)
     parent, sub = TARGET_CMD_DIR[target]
     out_dir = project / parent / sub
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -397,21 +646,34 @@ def export_commands(vault: Path, project: Path, target: str, quiet: bool = False
 
 
 def print_catalog(commands_dir: Path, env: str, project: Path | None = None) -> None:
-    """Print the available `/` commands (curated labels) + a start guide for `env`.
-    Reusable: mount-kuraka.sh calls this with --catalog for the Claude flow."""
+    """Print native command/skill entrypoints and a start guide for `env`."""
     if not commands_dir.is_dir():
         return
-    present = {p.stem for p in commands_dir.glob("*.md")}
+    if env == "codex":
+        candidates = list(commands_dir.glob("*/SKILL.md"))
+        present = {
+            path.parent.name for path in candidates
+            if (CODEX_COMMAND_MARKER in path.read_text(encoding="utf-8", errors="ignore")
+                or path.parent.name in CMD_ORDER)
+        }
+    else:
+        present = {p.stem for p in commands_dir.glob("*.md")}
     ordered = [c for c in CMD_ORDER if c in present] + sorted(present - set(CMD_ORDER))
     print("")
-    print('📚 COMANDOS DISPONIBLES (invocálos con "/"):')
+    if env == "codex":
+        print('📚 WORKFLOWS CODEX (invocálos con "$" o desde "/skills"):')
+    else:
+        print('📚 COMANDOS DISPONIBLES (invocálos con "/"):')
     print("")
     for name in ordered:
         arg, label = CMD_LABEL.get(name, ("", ""))
         if not label:
-            desc = command_desc(commands_dir / f"{name}.md")
+            path = (commands_dir / name / "SKILL.md" if env == "codex"
+                    else commands_dir / f"{name}.md")
+            desc = command_desc(path)
             label = (desc[:86] + "…") if len(desc) > 87 else desc
-        invoke = f"/{name} {arg}".strip()
+        prefix = "$" if env == "codex" else "/"
+        invoke = f"{prefix}{name} {arg}".strip()
         print(f"   {invoke:<26} {label}")
     print("")
     _print_start_guide(env, project)
@@ -442,14 +704,16 @@ def _print_start_guide(env: str, project: Path | None) -> None:
         print("      • Ya listo, a trabajar             →  /kuraka <requerimiento>")
         print("      (En Cursor NO se monta .claude/: el setup es AGENTS.md + estos comandos.)")
     elif env == "codex":
-        print("   1. Instalá los comandos (Codex los lee de tu home, no del repo):")
-        print("        mkdir -p ~/.codex/prompts && cp .codex/prompts/*.md ~/.codex/prompts/")
-        print(f"   2. Abrí Codex en el proyecto:  cd {proj} && codex")
-        print("   3. Tipeá  /  y elegí. Primer uso:")
-        print("      • ¿No sabés por dónde empezar?  →  /prompts:kuraka-wizard   (detecta plataforma + estado)")
-        print("      • Brownfield →  /prompts:amauta     · Greenfield →  /prompts:inti + /prompts:arki")
-        print("      • A trabajar →  /prompts:kuraka <requerimiento>")
-        print("      (En Codex NO se monta .claude/: el setup es AGENTS.md + estos comandos.)")
+        print(f"   1. Abrí Codex en el proyecto:  cd {proj} && codex")
+        print("      Codex carga `AGENTS.md`, agentes nativos desde `.codex/agents/`")
+        print("      y skills locales desde `.codex/skills/`.")
+        print("      Iniciá una sesión nueva después de cada mount para recargar el catálogo.")
+        print("   2. Usá `/skills` para elegir un workflow o mencioná la skill directamente:")
+        print("      • ¿No sabés por dónde empezar?  →  $kuraka-wizard")
+        print("      • Brownfield →  $amauta     · Greenfield →  $inti + $arki")
+        print("      • A trabajar →  $kuraka <requerimiento>")
+        print("      Codex reserva `/...` para comandos internos: `/kuraka` no es registrable")
+        print("      como alias local. El equivalente nativo es `$kuraka` o `/skills`.")
     elif env == "antigravity":
         print(f"   1. Abrí el workspace en Antigravity:  {proj}")
         print("   2. Invocá los workflows con  /nombre  (leídos de .agent/workflows/). Primer uso:")
@@ -505,7 +769,7 @@ def main() -> int:
     agent_tiers, tier_meanings = read_agent_tiers(vault)
 
     print(f"🧩 kuraka export · target={args.target} · {slug}")
-    agents_md = render_agents_md(project, slug, cfg, agents, agent_tiers, tier_meanings)
+    agents_md = render_agents_md(project, slug, cfg, agents, agent_tiers, tier_meanings, args.target)
     (project / "AGENTS.md").write_text(agents_md, encoding="utf-8")
     print(f"   + AGENTS.md  ({len(agents)} roles, {len(agents_md.splitlines())} líneas)")
 
@@ -519,15 +783,19 @@ def main() -> int:
         print("   ℹ️  Antigravity: se generó AGENTS.md. Verificá si tu versión también")
         print("      lee reglas de workspace propias; si es así, avisá para añadir ese target.")
 
-    # export the slash-commands as this tool's native commands
+    # Export user entrypoints using this tool's native workflow surface.
     export_commands(vault, project, args.target)
 
     print("")
     print(f"✅ export {args.target} completo. (Claude Code sigue usando .claude/ vía 'kuraka mount'.)")
 
     # catalog of available commands + how to start in this environment
-    parent, sub = TARGET_CMD_DIR[args.target]
-    print_catalog(project / parent / sub, args.target, project)
+    if args.target == "codex":
+        catalog_dir = project / ".codex" / "skills"
+    else:
+        parent, sub = TARGET_CMD_DIR[args.target]
+        catalog_dir = project / parent / sub
+    print_catalog(catalog_dir, args.target, project)
     return 0
 
 

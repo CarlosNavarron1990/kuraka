@@ -60,9 +60,7 @@ With that, pick a mode:
 | **Retroactive** | 4 | Code already implemented without workflow (anti-pattern, avoid it) |
 
 **Default is Normal.** Justify and present the proposed pipeline to the
-user **before** invoking any agent — they approve which phases to run. The
-presentation is a markdown table (format mandated in §"Solution outline"
-below), never a per-phase block list.
+user **before** invoking any agent — they approve which phases to run.
 
 ### Solution outline — mandatory CONCLUSION of the pre-flow conversation
 
@@ -91,30 +89,6 @@ pipeline and request approval to launch. Phase 1's REQ must not contradict
 the validated outline — if `po-analyst`'s analysis diverges, surface the
 diff at the Phase 1 gate instead of absorbing it.
 
-**Present the proposed pipeline as a MARKDOWN TABLE — never a per-phase
-block list.** One row per phase (or per collapsed group), columns exactly:
-`Fase | Agente | Skill | ¿Corre? | Justificación`. `¿Corre?` is one of
-`Sí` / `Colapsada` / `Omitida`. Group every omitted phase into a SINGLE row
-with its shared reason — do not spend one block per skipped phase. The table
-is the readable, scannable form the user approves from; a flat list of
-`Fase:` / `Agente:` / `Justificación:` lines separated by rules is a
-presentation defect. Skeleton (fill from the actual decision):
-
-| Fase | Agente | Skill | ¿Corre? | Justificación |
-|------|--------|-------|:-------:|---------------|
-| 1 PO Analysis | `po-analyst` | `analyze-requirement` | Sí | … |
-| 2 Story Refinement | `story-refiner` | `refine-stories` | Sí | … |
-| 3 Architect Review | `architect-reviewer` | `review-stories`+`schema-freeze` | Sí | Obligatoria: auth |
-| 4a Backend | `backend-developer` | `implement-story` | Sí | El fix |
-| 5 + 5.5 | `code-reviewer` + `security-reviewer` | `review-implementation` + `security-audit` | Sí | Obligatorias: auth |
-| 6.8 Smoke | orquestador | (custom) | Sí | Gate que el REQ anterior dejó abierto |
-| 7 Final Audit | `final-auditor` | `run-audit` | Sí | RETRO |
-| 2.5, 6, 6.5, 6.7 | — | — | Omitida | Sin suite de tests / Playwright / Docker en el repo |
-
-End with the launch question below the table (e.g. "¿Arranco con la
-fase X?"). The mode line (Normal/Reduced/Lite + why) goes ABOVE the table,
-one sentence — not folded into a phase row.
-
 ---
 
 ## Phase-Agent-Skill Map (Normal mode — 8 phases)
@@ -140,7 +114,6 @@ one sentence — not folded into a phase row.
 
 | Phase | Agent | Condition |
 |-------|-------|-----------|
-| 0 (pre-flow) | `jira-ticket-sync` | Only if the project tracks work in Jira (Jira MCP connected) and the user asks to sync/list pending tickets, or a cycle starts from a Jira ticket with no local file. Output feeds Phase 1 as REQ input. |
 | 5 (sub) | `migration-reviewer` | Only if there are files in `${architecture.paths.migrations_root}` |
 
 ---
@@ -202,9 +175,19 @@ The ORCHESTRATOR runs these directly (no subagent, `rules/17` T9 style):
 
 1. **Boot** the dev stack (or its health probe) once, if the project has a
    runtime component. A boot failure stops here.
-2. **Run the exact gate command that will judge Phase 4** — the same
-   `make check` / lint+typecheck+test string, unmodified — plus test
-   collection, once.
+2. **Run EVERY gate command any later phase will be judged by — one per
+   workspace**, unmodified, plus test collection, once. Not just the primary
+   test suite. For a backend+frontend repo that means, at minimum:
+   ```
+   backend:   ${stack.backend.test_cmd}      (e.g. make test-run)
+   frontend:  ${stack.frontend.typecheck_cmd}  AND  ${stack.frontend.lint_cmd}
+              AND  ${stack.frontend.test_cmd}
+   ```
+   Record exit code, counts and a `baseline_red` list **for each one
+   separately**. A gate with no recorded baseline cannot distinguish
+   *pre-existing* from *regression* — REQ-20260801 baselined only the backend
+   suite, and when `npm run lint` returned 1 mid-cycle the baseline had to be
+   reconstructed after the fact to find out whose fault it was.
 3. **Record the baseline in the checkpoint** (`kuraka-policies.md` schema):
    - `baseline_red`: the list of ALREADY-failing tests/checks (empty when
      green). From here on, **"green" for every later gate means "no
@@ -212,6 +195,18 @@ The ORCHESTRATOR runs these directly (no subagent, `rules/17` T9 style):
      usable even on a repo with pre-existing red (sie DD1243: 8 pre-existing
      red suites made a raw full-suite gate meaningless).
    - `baseline_green`: one line describing the passing state (counts, date).
+   - `baseline_migration_head`: the DB migration head at cycle start (e.g.
+     `alembic heads`, `prisma migrate status`), plus `baseline_git_head`.
+     **Re-run the head command (deterministic, ~0 tokens) before INTERPRETING
+     any per-story gate result.** If it moved, write that into the checkpoint
+     *before* judging the gate: a red gate with a moved head is suspected
+     collision with parallel work, not your own regression.
+
+     REQ-20260804: migration `000020` from a parallel branch (DD-1067) landed in
+     the same working tree mid-cycle at 13:11 and produced 3 chain failures that
+     had to be diagnosed by hand. Related convention (`rules/13`): chain
+     assertions are **membership** (`"000019" in chain`), never equality with
+     `head` — an equality assertion turns any foreign merge into a false red.
 4. **Fix or waive**: a broken boot / dead gate command (can't fail, exit 127,
    doesn't propagate) is fixed BEFORE Phase 4, or explicitly waived by the
    user and recorded as an accepted risk. Pre-existing red tests are NOT
@@ -220,15 +215,6 @@ The ORCHESTRATOR runs these directly (no subagent, `rules/17` T9 style):
 
 Gate: checkpoint contains `baseline_red` + `baseline_green`, and the gate
 command is proven able to fail (rule 17 T7).
-
-**Per-gate environment re-probe (not just once at 3.9).** Before EVERY later
-gate that runs the test command (per-story 4a/4b, Phase 6, retro-gates), the
-orchestrator re-runs a ~0-token probe: container daemon up (`docker info` or
-equivalent) and the test-DB port free of foreign containers. On failure, print
-the exact remediation command and **RE-POLL the probe until green** — never
-advance on a verbal "it's running now" (sie-v2: a down daemon reported as up
-cost lost turns in 3 cycles; a port-5434 collision was caught at zero cost by
-exactly this probe).
 
 ### Phase 4 — Implementation
 
@@ -383,29 +369,13 @@ to skip 6.8 ONLY in these cases, and only with explicit approval:
   not available in dev). In this case, open a follow-up to add the
   smoke test when the infrastructure is available.
 
-**"The agent cannot run it" ≠ "it cannot be run" (HARD).** If the smoke is
-not automatable from the agent's host but the USER can run the app (their
-IDE, a Windows box, a corp VPN), the smoke is NOT skipped — it becomes a
-**user-executed smoke**: the orchestrator writes the full scenario FIRST
-(preconditions, numbered steps, expected assertion per step) into
-`SMOKE-{ticket}.md`, the user executes and reports, the agent records the
-observed column + verdict. Handoffs quote the verdict **textually**
-(`PASS PARCIAL` stays `PASS PARCIAL`, never a numeric paraphrase). For
-cycles touching **auth / session / security-critical paths** this is a
-BLOCKING gate with no deferral: without an executed smoke the cycle closes
-**`PENDING-SMOKE`**, never DONE (facturacion-honorarios ENTRAID: conflating
-the two let 5 stacked defects survive a "closed" cycle — the most expensive
-defect in the vault's corpus, one full extra cycle + 5 user-in-the-loop
-iterations).
-
 If the user approves the skip, **document it in the Phase 7 RETRO** as
 an accepted risk with the textual justification.
 
 **Gate**:
 `${architecture.paths.docs_process_root}/smoke-tests/SMOKE-{ticket}.md`
-exists and green (agent-run or user-executed), OR skip justification
-approved by the user and documented in the RETRO. Auth/session/security
-cycles: no skip — executed smoke or `PENDING-SMOKE`.
+exists and green, OR skip justification approved by the user and
+documented in the RETRO.
 
 **Why**: lessons such as the smoke-test invariant generalize a common
 failure mode — `${stack.backend.test_cmd}` green + reviews approved +
@@ -471,18 +441,6 @@ errors and broken telemetry.
 - **Token optimization**: apply `rules/17-kuraka-token-optimizations.md`
   (context digest, end-only typecheck, combined phases, mapping-table
   stories, no auto-verify, reviewer digests, delta-only re-runs).
-- **Frozen contracts are never paraphrased** (HARD): an implementation/fix
-  prompt references SCHEMA-FROZEN by anchor and pastes the **literal contract
-  block + the delta** — never rewritten signatures or re-described wiring
-  locations (two prompt-divergence defects came from paraphrase). Any text a
-  parser will read (XML/JSON/YAML/SQL/config) is pasted in final syntax or
-  delegated to an implementer; after ANY config-file edit the orchestrator
-  validates it with the real parser at ~0 tokens (e.g.
-  `python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse(sys.argv[1])" f`)
-  — never by "reading it". Presence/absence claims about config entries use a
-  parser, not grep: comments defeat grep in both directions (an XML comment
-  containing `--` broke an entire Web.config parse — 8 cascading errors with
-  the user stuck in a live debug loop; 5 grep gates were wrong in one cycle).
 - **Claims are reproduced, never quoted** (`rules/17` T9): before declaring
   any gate green, the orchestrator itself runs the cheap deterministic
   checks — `git diff` of every function a report claims "untouched",

@@ -41,12 +41,12 @@ def test_should_have_valid_frontmatter_when_agent_file_exists(agents_dir: Path, 
     )
 
 
-def test_should_have_opus_for_judgment_agents(agents_dir: Path) -> None:
-    """Agentes de juicio complejo deben usar Opus."""
+def test_should_have_fable_for_judgment_agents(agents_dir: Path) -> None:
+    """Agentes de juicio complejo deben usar el tier frontier (Fable)."""
     judgment_agents = ["architect-reviewer", "security-reviewer", "final-auditor", "po-analyst"]
     for name in judgment_agents:
         fm = parse_frontmatter((agents_dir / f"{name}.md").read_text(encoding="utf-8"))
-        assert fm.get("model") == "opus", f"{name} should use 'opus' for judgment work, got '{fm.get('model')}'"
+        assert fm.get("model") == "fable", f"{name} should use 'fable' for judgment work, got '{fm.get('model')}'"
 
 
 def test_should_have_haiku_for_mechanical_agents(agents_dir: Path) -> None:

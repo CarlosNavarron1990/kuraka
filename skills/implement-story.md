@@ -85,6 +85,20 @@ Stack-specific rules (e.g., "no try/except in endpoints" for FastAPI,
 "all `<script setup lang='ts'>`" for Vue) live in the stack profile and
 apply automatically.
 
+### Precedence: the orchestrator prompt beats the story's `Files` table
+
+When the orchestrator's prompt and the story's `Files` table disagree about a
+deliverable, **the ORCHESTRATOR PROMPT WINS** — and you MUST report the conflict
+explicitly in your final message, naming the dropped deliverable, so the
+orchestrator can reassign it to whichever phase owns it.
+
+Do not silently satisfy both. Do not silently satisfy the story.
+
+*REQ-20260801: given "do not write new feature tests", one batch dropped two spec
+files listed in its story, flagged the conflict, and Phase 6 picked them up —
+correct. Another batch, given the same instruction, wrote 12 tests anyway. Making
+this a rule instead of a coin flip is the point.*
+
 ## When Done
 
 Report:
@@ -93,3 +107,13 @@ Report:
 - `${stack.*.lint_cmd}` result.
 - `${stack.*.test_cmd}` result.
 - Any issues found during implementation.
+- **Any deliverable in the story's `Files` table that you did NOT produce**, and
+  why (see precedence rule above).
+- **Any user-visible behavior change the story did not explicitly request.**
+  Answer this deliberately, not reflexively — in REQ-20260801 this question
+  surfaced a silently-removed dashboard card and a broken image preview that no
+  test caught.
+
+**Never end your turn waiting on a background command.** Run the gate, read its
+own exit code, and deliver the written report. A run that ends with "I'll wait
+for the result" delivers nothing and its self-assessment is lost.

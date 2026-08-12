@@ -15,34 +15,6 @@ Reduced-by-risk, Lite, Retroactive).
 Every `Agent` call has retry and timeout policies to prevent silent
 failures from propagating through the workflow.
 
-### Role lock (MANDATORY prompt preamble)
-
-Every subagent invocation prompt begins with a role lock:
-
-> You are a specialist subagent inside a running Kuraka cycle — the phase and
-> the inputs in THIS prompt are your entire task. Do not read `kuraka.md` /
-> `kuraka-modes.md`, do not propose a pipeline, do not ask what the requirement
-> is. If an input artifact you need is missing, ask ONE precise question and
-> stop.
-
-Without it, a subagent can drift into acting as the orchestrator (guai
-REQ-20260722: a Phase-2.5 invocation re-derived the whole pipeline and produced
-nothing — 66K tokens; the explicit lock eliminated the confusion in later
-cycles).
-
-### Git is READ-ONLY for review/verify subagents (HARD)
-
-`architect-reviewer`, `code-reviewer`, `security-reviewer`, `test-engineer`
-(review modes), `e2e-tester`, `deployment-verifier`, `migration-reviewer` — and
-any agent whose job is to JUDGE work rather than produce it — may run only
-read-only git: `status`, `log`, `diff`, `show`, `branch --list`, `rev-parse`.
-They must NEVER run `merge`, `pull`, `checkout`, `switch`, `reset`, `rebase`,
-`cherry-pick`, `stash pop`, `commit`, or `push`. A dirty or mid-merge tree found
-on entry is a **BLOCKER to report, never a state to resolve**. (guai
-REQ-20260721: a reviewer triggered an unintended `git merge` mid-review and left
-the consumer branch in a conflicted state.) Writes to the working tree belong to
-implementer agents and the orchestrator only.
-
 ### Retry policy
 
 - **Max 2 retries per agent** (3 total attempts).
@@ -67,6 +39,28 @@ Issues found:
 
 Please re-generate addressing these issues.
 ```
+
+### Agent liveness — how to tell a working agent from a dead one
+
+Before concluding that a long-running agent has died:
+
+1. **Poll the files, not the clock.** `find <the agent's authorized paths>
+   -newermt '-15 minutes'` and inspect the **MOST RECENTLY** modified file —
+   never the first files it wrote. Early files go stale while the agent works
+   normally, further down its own file list.
+2. **`duration_ms` / wall-clock is NOT a health signal** (already policy for
+   budget) and is **not evidence of death**.
+3. **NEVER run a gate against a tree an agent still holds.** A mid-flight tree is
+   *expected* to be red; reading that red as failure produces a false verdict on
+   a healthy run.
+
+Only after **≥ 2 polls, ≥ 10 minutes apart**, show zero modifications anywhere in
+the authorized set should intervention be considered — and even then, snapshot
+before gating.
+
+**Evidence (REQ-20260801):** an agent was declared DEAD at ~7h on the stale
+mtimes of its FIRST files, gated mid-flight, and its half-written state read as
+failure. It was alive and finished green minutes later.
 
 ### Timeout policy
 
@@ -97,6 +91,24 @@ To prevent runaway loops:
 | Audit (`final-auditor`, `pattern-detector`) | 25 |
 
 If an agent exceeds its limit without producing output → treat as timeout.
+
+**The tool-use cap is MEASURED after every invocation, exactly like the token cap.**
+Advisory prose failed for the token cap until it became an action (see below); it is
+failing for this one now. After each `Agent` call, compare `tool_uses` against the
+agent's cap, at 0 tokens, and act:
+
+| Consumption | Orchestrator action |
+|---|---|
+| **> 1.0×** | WARN + record `tool_uses_ok: false` + a `note` in telemetry |
+| **> 2.0×** | WARN + **write the cause into the checkpoint** before the next invocation |
+| **> 3.0×** | The agent must emit a check-in describing what it still needs **before** continuing |
+
+Record `tool_uses_ok` alongside `budget_ok` in every telemetry entry.
+
+**Evidence (REQ-20260804-audit-columns):** `story-refiner` ran **111/30 (3.7×)** and
+`test-engineer` **100/50 (2.0×)** without a single warning, because `budget_ok` only
+ever looked at tokens. The same cycle's token cap — an ACTION since REQ-20260801 —
+caught and annotated all three over-budget analysis phases on the first try.
 
 ### Rate-limit policy during Phase 4
 
@@ -162,37 +174,9 @@ typecheck + test ALL pass**, not just the test runner.
   single `make check` target (lint + typecheck + test) so the gate is one
   command that cannot pass while the build is broken.
 
-- **The environment the gate runs in must be current.** A story that touches
-  the dependency manifest, lockfile, or migrations forces a rebuild of the
-  test image/environment BEFORE its gate is trusted (no-cache if migrations
-  changed); the gate never runs shadowed by host artifacts (e.g. a bind-mounted
-  `node_modules`). A sudden burst of `Can't locate revision` / `column does not
-  exist` after touching migrations is a false regression from a stale image —
-  rebuild, don't chase (adela: two false greens in one cycle; guai: ~179 phantom
-  failures). `deployment-verifier` confirms new deps are present in the built
-  image.
-
 Reference: kuraka-control LL-014 — an invalid `as string` cast rode green ~3
 cycles because the Phase-4 gate ran vitest only. Also `gate command integrity`
 above (the gate must be able to fail) and Phase 6.8 (`green ≠ working feature`).
-
----
-
-## RTK token saver (transparent, if installed)
-
-If RTK (`rtk`) is installed with its global hook (`rtk init -g` → a `PreToolUse`
-hook `rtk hook claude` in `~/.claude/settings.json`), every Bash command an agent
-runs is **automatically rewritten** to its filtered `rtk` form (grep/cat/ls/git/
-test output is compressed before it reaches context). This needs NO per-agent
-wiring — all Kuraka subagents inherit it. Typical savings 70–90% on dev ops; check
-with `rtk gain`. See `RECOMMENDED-COMPONENTS.md`.
-
-**One exception — bypass the filter for byte-exact reads.** RTK truncates/dedups
-output, which can silently drop a field during a fidelity/contract check. When an
-agent needs the *exact, full* bytes — a verbatim-payload diff, an in-vivo contract
-probe, a frozen-schema cross-check — run the command through `rtk proxy <cmd>`
-(raw, unfiltered) instead of the rewritten form. Never run a contract cross-check
-on truncated output.
 
 ---
 
@@ -205,7 +189,7 @@ Nominal budget per phase to detect deviations:
 | 1 PO Analysis | 80–120K | 200K |
 | 2 Story Refinement | 60–100K | 180K |
 | 2.5 Test Planning | 60–100K | 150K |
-| 3 Architect Review | 80–120K | 180K |
+| 3 Architect Review | 50–80K | 150K |
 | 4a Backend Impl (per story M) | 100–200K | 400K |
 | 4b Frontend Impl (per story M) | 100–200K | 400K |
 | 5 Code Review | 70–120K | 200K |
@@ -213,7 +197,7 @@ Nominal budget per phase to detect deviations:
 | 6 Tests (per story M) | 80–150K | 300K |
 | 6.5 E2E | 50–100K | 200K |
 | 6.7 Deployment | 30–60K | 120K |
-| 7 Final Audit | 60–100K | 150K |
+| 7 Final Audit | 40–80K | 150K |
 
 These thresholds are **tokens (model compute)** — the only real spend signal.
 **Wall-clock `duration_ms` is NOT a budget gate**: it includes tool/DB/container
@@ -225,18 +209,44 @@ yet reported `budget_ok: true`; the metric conflated wait with compute).
 **Action if a phase exceeds "investigate if exceeds" (tokens)**:
 1. Abort the phase if still running.
 2. Analyze telemetry (which files were read? how many tool_uses?).
-3. Apply patterns T1–T10 from `rules/17-kuraka-token-optimizations.md`.
+3. Apply patterns T1–T8 from `rules/17-kuraka-token-optimizations.md`.
 4. Re-launch with an optimized prompt.
 
-**Mid-cycle consequence (not just retro material)**: a completed run that
-exceeded its threshold MUST be logged `budget_ok: false` immediately, and the
-NEXT run of the same agent type in this cycle MUST carry a pre-extracted
-digest (T1/T8/T9) — over-budget without corrective action on the next
-invocation is an orchestrator failure, not a telemetry footnote.
-(REQ-20260703: every agent ran 2–3× its target, one over its hard cap, and
-all 19 entries were recorded `budget_ok: true` — the check never fired.
-`aggregate-telemetry.py` now recomputes `budget_ok` and flags contradictions
-in the dashboard.)
+### The cap is an ACTION, measured after EVERY Agent call (MANDATORY)
+
+Advisory text has failed for eight cycles. The orchestrator measures
+`total_tokens` against the **phase** threshold after each invocation, at 0
+tokens, and acts:
+
+| Consumption | Orchestrator action |
+|---|---|
+| **> 1.0×** | WARN, write `budget_note`, continue |
+| **> 1.5×** | WARN + **write the cause into the checkpoint** before the next invocation |
+| **> 2.0×** | **HARD STOP.** Do not invoke the next phase until the digest or scope is re-cut, and the re-cut is written into the checkpoint |
+
+Full rationale and evidence in `rules/17-kuraka-token-optimizations.md` → Rule T0.
+
+### One budget model: PHASE thresholds win
+
+`budget_ok` in the telemetry uses **per-phase** thresholds (this table). The
+vault's `aggregate-telemetry.py` uses **per-agent** thresholds. They disagree —
+REQ-20260801's Phase-2.5 run (291,085) is `budget_ok: false` against the 150K
+phase threshold and simultaneously *in band* against the aggregator's 300K
+test-engineer threshold, so it never appeared in the dashboard's over-budget
+column. The same cycle reads as 4-over or 3-over depending on who you ask.
+
+**Phase thresholds are authoritative**, because they encode what the phase
+*should cost*, not what the agent *usually spends*. `aggregate-telemetry.py` must
+be changed to read them; until it is, treat its over-budget column as a lower
+bound.
+
+### Telemetry completeness (REGRESSION — 3 consecutive cycles)
+
+An `Agent` invocation with **no telemetry entry** is invisible to the audit, and
+the cycle's reported cost is then wrong, not merely imprecise. REQ-20260801
+recorded 19 of 31 runs; reconstructing the missing 12 moved the cycle from a
+reported 3.76M to an actual **5.90M tokens**. Write the entry immediately after
+each call — not at the end of the phase, not "later".
 
 ---
 
@@ -258,8 +268,6 @@ After EACH gate approved by the user, write the workflow state to:
   "phases_pending": ["4b", "5", "5.5", "6", "7"],
   "started_at": "ISO 8601",
   "last_updated": "ISO 8601",
-  "baseline_red": [],
-  "baseline_green": "one line: passing state at Phase 3.9 pre-flight (counts, date)",
   "artifacts": {
     "req_path": "docs/process/REQ-...",
     "story_paths": ["docs/process/stories/..."],
@@ -330,7 +338,10 @@ so the `final-auditor` (Phase 7) can analyze consumption by agent.
      "duration_ms": 0,
      "status": "ok | session_limit | interrupted | error",
      "produced": "<short description>",
-     "budget_ok": true
+     "budget_ok": true,
+     "tool_uses_ok": true,
+     "resumed": false,
+     "tokens_incremental": null
    }
    ```
 3. If an agent is invoked multiple times in the same phase, each
@@ -342,22 +353,25 @@ so the `final-auditor` (Phase 7) can analyze consumption by agent.
    actually comparing. A run cut short logs `status: "session_limit"` (so a
    0-token entry isn't read as "no work"); `budget_ok` then reflects only the
    tokens actually spent.
+6. Set `tool_uses_ok` from **tool_uses vs the agent's cap** (table above) — same
+   discipline: compare, never default to `true`.
+7. **A RESUMED agent** (continued via `SendMessage` / resume rather than spawned
+   fresh) reports the **cumulative** tokens of its whole transcript, not what the
+   delta cost. For those entries set `"resumed": true` and record
+   `"tokens_incremental"` — your best estimate of the delta's own spend. The
+   `final-auditor` ranks by `tokens_incremental` when present, and
+   `aggregate-telemetry.py` sums it instead of `total_tokens`.
+
+   Two failures this prevents: (1) cycle totals inflate — REQ-20260804 reports
+   2,729,123 tokens against a real ~1,985,000 (+37%) from 4 resumed runs of 15;
+   (2) the T10 in-flight detector ("high tokens + low tool uses = re-pasted
+   context") **false-positives on every resume** — that cycle's 2-line MEDIUM fix
+   scored 53,641 tokens/use and was a flawless run. Without the flag, a
+   pathological fresh agent and a healthy resume are indistinguishable.
 
 The `final-auditor` reads this JSON in Phase 7 and produces the token
 ranking in the retro. Missing telemetry degrades the retro but doesn't
 block it.
-
-**Completeness is CHECKED, not assumed** (`aggregate-telemetry.py`): an
-agent run with `status: "ok"` but zero/missing `total_tokens`, or with
-tokens but missing `tool_uses`/`duration_ms`, is flagged as **telemetry
-debt** in the dashboard; so is a checkpoint-completed phase with no
-telemetry entry (label: "orchestrator-direct or missing?"). Orchestrator-side
-entries (`"agent": "orchestrator-*"`) may legitimately log 0 tokens; a
-run cut short logs `status: "session_limit"` — both are exempt. The
-final-auditor's retro must state "telemetry complete" or list the debts
-with justification. (Motivation: 4/5 vault projects had unverifiable
-telemetry — missing cycles, 0-token entries, null durations — so the
-whole budget/optimization loop ran on unchecked data.)
 
 ---
 
