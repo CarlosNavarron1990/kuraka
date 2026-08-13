@@ -218,11 +218,21 @@ def render_agents_md(project: Path, slug: str, cfg: dict, agents: list[tuple[str
     tenant = _g(cfg, "conventions.multi_tenant", default="false")
     maxf = _g(cfg, "conventions.max_file_loc", default="—")
     maxfn = _g(cfg, "conventions.max_function_loc", default="—")
-    project_layer_dir = ".codex/project" if target == "codex" else ".claude/project"
-    skills_dir = ".codex/skills" if target == "codex" else ".claude/skills"
-    agents_dir = ".codex/agents" if target == "codex" else ".claude/agents"
-    has_layer = ((project / ".codex" / "project").is_dir() or (project / ".claude" / "project").is_dir()) \
-        if target == "codex" else (project / ".claude" / "project").is_dir()
+    if target == "antigravity":
+        project_layer_dir = ".agents/project"
+        skills_dir = ".agents/skills"
+        agents_dir = ".agents/agents"
+        has_layer = ((project / ".agents" / "project").is_dir() or (project / ".claude" / "project").is_dir())
+    elif target == "codex":
+        project_layer_dir = ".codex/project"
+        skills_dir = ".codex/skills"
+        agents_dir = ".codex/agents"
+        has_layer = ((project / ".codex" / "project").is_dir() or (project / ".claude" / "project").is_dir())
+    else:
+        project_layer_dir = ".claude/project"
+        skills_dir = ".claude/skills"
+        agents_dir = ".claude/agents"
+        has_layer = (project / ".claude" / "project").is_dir()
 
     if target == "codex":
         def adapt_role_description(text: str) -> str:
@@ -360,12 +370,13 @@ Key non-negotiables:
 def _preamble(target: str) -> str:
     if target == "antigravity":
         return (
-            "> **Kuraka — entorno Antigravity.** En Antigravity adoptás vos cada rol secuencialmente.\n"
-            "> **REGLA DE CONTINUIDAD Y EJECUCIÓN DEL CICLO:**\n"
-            "> 1. Al ejecutar la Fase 1 (`po-analyst`), generá el documento REQ, presentá la tabla de fases y la pregunta del gate.\n"
-            "> 2. **CONTINUIDAD OBLIGATORIA DEL FLUJO**: Una vez que el usuario apruebe o indique continuar, **ADOPTÁ DE INMEDIATO** el rol de la siguiente fase (`story-refiner` para Fase 2 → `test-engineer` para Fase 2.5 → `architect-reviewer` para Fase 3 → `backend-developer`/`frontend-developer` para Fase 4 → `code-reviewer` para Fase 5 → `security-reviewer` para Fase 5.5 → `test-engineer` para Fase 6 → `final-auditor` para Fase 7).\n"
-            "> 3. No te detengas ni abandones el ciclo a mitad de camino; avanza rol por rol hasta completar la auditoría final y el archivado.\n"
-            "> 4. Consultá las convenciones en `.agents/project/` o `.claude/project/`, y los skills en `.agents/skills/` o `.claude/skills/`.\n\n"
+            "> **Kuraka — entorno Antigravity.** En Antigravity adoptás vos cada rol secuencialmente en el hilo principal.\n"
+            "> **REGLAS DE EJECUCIÓN Y CONTINUIDAD DEL CICLO:**\n"
+            "> 1. **EJECUCIÓN EN FOREGROUND — NO USAR BACKGROUND TASKS/SUBAGENTES**: Antigravity NO debe lanzar `manage_task`, `browser_subagent` ni comandos en background para ejecutar las fases de Kuraka. Todo el trabajo se realiza paso a paso en esta conversación activa.\n"
+            "> 2. **ADOPCIÓN DE ROLES EN FOREGROUND**: Adoptá vos mismo el rol indicado por fase (`po-analyst` → `story-refiner` → `test-engineer` → `architect-reviewer` → `backend-developer`/`frontend-developer` → `code-reviewer` → `security-reviewer` → `test-engineer` → `final-auditor`).\n"
+            "> 3. **PAUSA EN GATES**: Al finalizar cada fase, presentá el resultado y solicitá la confirmación/aprobación del usuario antes de avanzar a la siguiente fase.\n"
+            "> 4. **FASE 7 OBLIGATORIA (RETRO + AJUSTE DE AGENTES)**: El ciclo NO termina tras pasar las pruebas. Una vez aprobados los tests (Fase 6/6.8), avanzá obligatoriamente a la Fase 7 (`final-auditor` / `run-audit`): redactá el `RETRO`, aplicá los parches de optimización directamente en `.agents/agents/`, `.agents/skills/` o `.agents/project/` para ajustar los agentes en ciclos futuros, y ejecutá `python3 kuraka-backup.py <project-root> --target antigravity`.\n"
+            "> 5. Consultá las convenciones en `.agents/project/` o `.claude/project/`, y los skills en `.agents/skills/` o `.claude/skills/`.\n\n"
         )
     if target == "codex":
         return (
@@ -403,6 +414,11 @@ def transform_command(name: str, text: str, target: str) -> str:
         body = body.replace(".claude/agents/", ".agents/agents/")
         body = body.replace(".claude/project/", ".agents/project/")
         body = body.replace(".claude/stack-profiles/", ".agents/stack-profiles/")
+        body = body.replace("subagente", "rol")
+        body = body.replace("subagents", "roles")
+        body = body.replace("subagent", "role")
+        body = body.replace("launching any subagent", "adopting any role")
+        body = body.replace("invoking the first subagent", "adopting the first role")
     elif target == "codex":
         # Adapt paths from Claude's native layout to Codex's project-local layout.
         desc = adapt_codex_paths(desc)

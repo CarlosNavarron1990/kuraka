@@ -682,7 +682,7 @@ def main() -> int:
 
     # re-apply project-specific overrides
     if target_env != "codex":
-        run_py("kuraka-restore.py", str(target), "--overrides-only")
+        run_py("kuraka-restore.py", str(target), "--overrides-only", "--target", target_env)
 
     # --- ensure .gitignore excludes personal content ---
     gitignore = target / ".gitignore"

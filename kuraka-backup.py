@@ -69,6 +69,8 @@ def main() -> int:
     ap.add_argument("--docs-root", default="docs/process", help="project-relative docs/process root")
     ap.add_argument("--layer-root", default=".claude/project",
                     help="project-relative specialization layer (default: .claude/project)")
+    ap.add_argument("--target", choices=("claude", "antigravity", "cursor", "codex"), help="target platform")
+    ap.add_argument("--platform", help="platform directory name (e.g. agents, claude, codex, cursor)")
     ap.add_argument("--cycles-only", action="store_true", help="only archive RETROs+telemetry (skip layer/state)")
     ap.add_argument("--overrides-only", action="store_true", help="only snapshot agent/skill/command overrides")
     ap.add_argument("--skip-overrides", action="store_true",
@@ -98,7 +100,24 @@ def main() -> int:
     branch = kc.git_branch(project)
     today = date.today().isoformat()
 
-    print(f"🗄️  kuraka-backup · {slug}  (rama: {branch})")
+    platform = args.platform
+    if not platform:
+        if args.target == "antigravity" or (project / ".agents").is_dir():
+            platform = "agents"
+        elif args.target == "codex" or (project / ".codex").is_dir():
+            platform = "codex"
+        elif args.target == "cursor" or (project / ".cursor").is_dir():
+            platform = "cursor"
+        else:
+            platform = "claude"
+
+    layer_root = args.layer_root
+    if layer_root == ".claude/project":
+        p_dir = f".{platform}" if not platform.startswith(".") else platform
+        if (project / p_dir / "project").is_dir() or platform != "claude":
+            layer_root = f"{p_dir}/project"
+
+    print(f"🗄️  kuraka-backup · {slug}  (rama: {branch}, plataforma: {platform})")
     print(f"   proyecto: {project}")
     print(f"   destino:  {kc.project_dir(vault, slug)}/")
     print("")
@@ -109,17 +128,18 @@ def main() -> int:
         if args.skip_overrides:
             print("   overrides/ omitidos para esta proyección de plataforma")
             return 0
-        n_ov = kc.snapshot_overrides(project, vault, slug)
-        print(f"   overrides/ ← .claude/{{agents,skills,commands}}   ({n_ov} archivo(s) divergente(s))")
+        n_ov = kc.snapshot_overrides(project, vault, slug, platform=platform)
+        p_name = f".{platform}" if not platform.startswith(".") else platform
+        print(f"   overrides/ ← {p_name}/{{agents,skills,commands}}   ({n_ov} archivo(s) divergente(s))")
         print("")
         print(f"✅ overrides de {slug} respaldados.")
         return 0
 
     if not args.cycles_only:
         # layer = platform-specific project specialization
-        layer_src = project / args.layer_root
+        layer_src = project / layer_root
         n_layer = kc.snapshot_tree(layer_src, kc.layer_dir(vault, slug))
-        print(f"   layer/  ← {args.layer_root.rstrip('/')}/        ({n_layer} archivos)")
+        print(f"   layer/  ← {layer_root.rstrip('/')}/        ({n_layer} archivos)")
         # state = docs/process (REQ, stories, test-plans, schemas, checkpoints, …)
         state_src = project / args.docs_root
         n_state = kc.snapshot_tree(state_src, kc.state_dir(vault, slug) / "docs-process")
@@ -135,8 +155,10 @@ def main() -> int:
     if args.skip_overrides:
         print("   overrides/ omitidos para esta proyección de plataforma")
     else:
-        n_ov = kc.snapshot_overrides(project, vault, slug)
-        print(f"   overrides/ ← .claude/{{agents,skills,commands}}   ({n_ov} archivo(s) divergente(s))")
+        n_ov = kc.snapshot_overrides(project, vault, slug, platform=platform)
+        p_name = f".{platform}" if not platform.startswith(".") else platform
+        print(f"   overrides/ ← {p_name}/{{agents,skills,commands}}   ({n_ov} archivo(s) divergente(s))")
+
 
     update_backup_sidecar(vault, slug, branch, today)
     print("")

@@ -104,11 +104,12 @@ Create at
 
 Also copy to `RETRO-LATEST.md` for easy access.
 
-### 8. Ask user
+### 8. Ask user and apply patches
 
 "Should I apply the proposed patches from section 6? Project-layer
-changes can be applied immediately; framework changes require
+changes and agent prompt tuning can be applied immediately to the mounted agent files (`.agents/` in Antigravity, `.claude/` in Claude Code, `.cursor/` in Cursor, `.codex/` in Codex); framework changes require
 contributing back to the framework repo."
+When approved by the user, apply project-layer and agent prompt patches directly to the corresponding mounted files.
 
 ### 9. Back up the cycle state to the vault (MANDATORY — last step)
 
@@ -116,7 +117,7 @@ This closes the cycle by snapshotting the project's full Kuraka state into the
 vault's unified store:
 
 ```bash
-python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-backup.py" <project-root>
+python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-backup.py" <project-root> [--target <antigravity|claude|cursor|codex>]
 ```
 
 Snapshots `layer/` (`.claude/project`), `state/docs-process/` (REQ, stories,

@@ -392,10 +392,11 @@ metrics.
   - Findings per agent + concrete prompt patches OR project-layer additions.
   - Systemic issues + improvements.
   - Token / latency telemetry.
+- **Agent Tuning & Patch Application:** Apply approved project-layer or agent prompt patches directly to the project's mounted agent files (`.agents/agents/`, `.agents/skills/`, `.agents/project/` for Antigravity; `.claude/` for Claude Code; `.cursor/` for Cursor; `.codex/` for Codex). This closes the retro-apply loop so future cycles benefit from tuned agent behavior.
 - **MANDATORY last step — vault backup (never skip):** after the RETRO is
-  written, snapshot the project's full Kuraka state into the central vault store:
+  written and patches applied, snapshot the project's full Kuraka state into the central vault store:
   ```bash
-  python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-backup.py" <project-root>
+  python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-backup.py" <project-root> [--target <antigravity|claude|cursor|codex>]
   ```
   This is a hard exit criterion: Phase 7 is NOT complete until this command
   exits 0. It (1) feeds `pattern-detector` across all projects and (2) preserves

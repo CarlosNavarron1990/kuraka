@@ -79,6 +79,8 @@ def main() -> int:
     ap.add_argument("--docs-root", default="docs/process", help="project-relative docs/process root")
     ap.add_argument("--layer-root", default=".claude/project",
                     help="project-relative specialization layer (default: .claude/project)")
+    ap.add_argument("--target", choices=("claude", "antigravity", "cursor", "codex"), help="target platform")
+    ap.add_argument("--platform", help="platform directory name (e.g. agents, claude, codex, cursor)")
     ap.add_argument("--yes", "-y", action="store_true", help="restore without prompting")
     ap.add_argument("--no", action="store_true", help="never restore (report only)")
     ap.add_argument("--overrides-only", action="store_true",
@@ -104,22 +106,40 @@ def main() -> int:
 
     slug = kc.project_slug(project, args.name)
 
+    platform = args.platform
+    if not platform:
+        if args.target == "antigravity" or (project / ".agents").is_dir():
+            platform = "agents"
+        elif args.target == "codex" or (project / ".codex").is_dir():
+            platform = "codex"
+        elif args.target == "cursor" or (project / ".cursor").is_dir():
+            platform = "cursor"
+        else:
+            platform = "claude"
+
+    layer_root = args.layer_root
+    if layer_root == ".claude/project":
+        p_dir = f".{platform}" if not platform.startswith(".") else platform
+        if (project / p_dir / "project").is_dir() or platform != "claude":
+            layer_root = f"{p_dir}/project"
+
     # --overrides-only: unconditional, silent-unless-applied re-apply of the
     # project's own agent/skill/command tunings on top of the fresh vault copy.
     # Called by mount on every run (TTY or not) — overrides must never be lost.
     if args.overrides_only:
         if args.skip_overrides:
             return 0
-        oc = kc.restore_overrides(vault, slug, project)
+        oc = kc.restore_overrides(vault, slug, project, platform=platform)
         if oc:
-            print(f"   ✓ overrides re-aplicados: {oc} archivo(s) (.claude/{{agents,skills,commands}}, pisando la copia del vault)")
+            p_name = f".{platform}" if not platform.startswith(".") else platform
+            print(f"   ✓ overrides re-aplicados: {oc} archivo(s) ({p_name}/{{agents,skills,commands}}, pisando la copia del vault)")
         return 0
 
     if not kc.has_history(vault, slug):
         print(f"ℹ️  el central no tiene historia para «{slug}». Nada que restaurar.")
         return 0
 
-    print(f"🔁 kuraka-restore · {slug}")
+    print(f"🔁 kuraka-restore · {slug}  (plataforma: {platform})")
     print(f"   historia en central: {summarize(vault, slug)}")
 
     if args.check:
@@ -136,10 +156,10 @@ def main() -> int:
         print("   (no se restauró — corré con --yes para confirmar sin prompt)")
         return 0
 
-    layer_dst = project / args.layer_root
+    layer_dst = project / layer_root
     lc, ls = restore_tree(kc.layer_dir(vault, slug), layer_dst, args.force)
     sc, ss = restore_tree(kc.state_dir(vault, slug) / "docs-process", project / args.docs_root, args.force)
-    print(f"   layer → {args.layer_root.rstrip('/')}/   ({lc} copiados, {ls} ya existían)")
+    print(f"   layer → {layer_root.rstrip('/')}/   ({lc} copiados, {ls} ya existían)")
     print(f"   state → {args.docs_root}/  ({sc} copiados, {ss} ya existían)")
     if (ls or ss) and not args.force:
         print("   nota: los que ya existían NO se pisaron — usá --force para sobrescribir.")
@@ -147,12 +167,14 @@ def main() -> int:
     # overrides ALWAYS win over the freshly-mounted vault copy (that's their point),
     # so they overwrite regardless of --force.
     if not args.skip_overrides:
-        oc = kc.restore_overrides(vault, slug, project)
+        oc = kc.restore_overrides(vault, slug, project, platform=platform)
         if oc:
-            print(f"   overrides → .claude/{{agents,skills,commands}}   ({oc} re-aplicado(s), pisando la copia del vault)")
+            p_name = f".{platform}" if not platform.startswith(".") else platform
+            print(f"   overrides → {p_name}/{{agents,skills,commands}}   ({oc} re-aplicado(s), pisando la copia del vault)")
     print("")
     print(f"✅ restore de {slug} completo.")
     return 0
+
 
 
 if __name__ == "__main__":
