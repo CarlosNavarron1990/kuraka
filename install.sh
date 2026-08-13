@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 # install.sh — one-command Kuraka setup (clone if needed + put the CLI on PATH).
 #
@@ -48,7 +49,7 @@ echo ""
 # 1) make the CLI executable + symlink it onto PATH
 chmod +x "$VAULT/kuraka" "$VAULT/mount-kuraka.sh" "$VAULT/validate-kuraka.sh" 2>/dev/null || true
 mkdir -p "$BIN_DIR"
-ln -sf "$VAULT/kuraka" "$BIN_DIR/kuraka"
+ln -sf "$VAULT/kuraka" "$BIN_DIR/kuraka" 2>/dev/null || cp -f "$VAULT/kuraka" "$BIN_DIR/kuraka"
 echo "   ✓ CLI: $BIN_DIR/kuraka → $VAULT/kuraka"
 
 # 2) write the env + PATH block into the shell rc(s), idempotently
@@ -81,6 +82,14 @@ echo "     cd /ruta/a/tu/solución && kuraka mount     # monta Kuraka acá"
 echo "     kuraka mount /ruta/a/otra/solución          # o indicá la ruta"
 echo "     kuraka doctor                               # verifica el setup"
 echo ""
+case "${OSTYPE:-}" in
+  msys*|cygwin*|mingw*|win32*)
+    echo "   ℹ️ Nota para Windows (PowerShell / CMD):"
+    echo "      Para integrar Kuraka en PowerShell o CMD nativo, ejecutá:"
+    echo "      powershell -ExecutionPolicy Bypass -File .\\install.ps1"
+    echo ""
+    ;;
+esac
 if ! command -v rtk >/dev/null 2>&1; then
   echo "   (recomendado) RTK para ahorrar 70–90% de tokens:"
   echo "     brew install rtk && rtk init -g"

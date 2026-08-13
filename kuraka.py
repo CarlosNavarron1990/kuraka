@@ -115,7 +115,7 @@ def cmd_doctor() -> int:
     print(f"   git:          {'✓ ' + (shutil.which('git') or '') if shutil.which('git') else 'NO (instalalo)'}")
     if shutil.which("rtk"):
         try:
-            v = subprocess.run(["rtk", "--version"], capture_output=True, text=True).stdout.strip()
+            v = subprocess.run(["rtk", "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout.strip()
         except OSError:
             v = ""
         print(f"   rtk:          {v or 'instalado'} ✓")

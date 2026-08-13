@@ -36,6 +36,13 @@ if [ ! -d "$VAULT" ]; then
   exit 1
 fi
 
+if command -v python3 >/dev/null 2>&1; then PY=python3
+elif command -v python >/dev/null 2>&1; then PY=python
+else
+  echo "❌ ERROR: se necesita Python 3 (python3/python) instalado y en el PATH." >&2
+  exit 1
+fi
+
 # --- find the nearest ancestor (incl. $PWD) that has .claude/ ---
 find_project_root() {
   local d="${1:-$PWD}"
@@ -100,13 +107,13 @@ case "$sub" in
     fi
     case "$tgt" in
       claude|codex|cursor|antigravity)
-        python3 "$VAULT/kuraka-mount.py" "$target" --target "$tgt" ;;
+        "$PY" "$VAULT/kuraka-mount.py" "$target" --target "$tgt" ;;
       *)
         echo "❌ target desconocido: $tgt  (claude | codex | cursor | antigravity)" >&2; exit 1 ;;
     esac
     ;;
   init)
-    python3 "$VAULT/kuraka-init.py" "${1:-$PWD}" "${@:2}"
+    "$PY" "$VAULT/kuraka-init.py" "${1:-$PWD}" "${@:2}"
     ;;
   update)
     root="$(find_project_root)" || { echo "❌ no hay proyecto con .claude/ desde $PWD" >&2; exit 1; }
@@ -114,15 +121,15 @@ case "$sub" in
     ;;
   backup)
     root="$(find_project_root "${1:-$PWD}")" || root="${1:-$PWD}"
-    python3 "$VAULT/kuraka-backup.py" "$root"
+    "$PY" "$VAULT/kuraka-backup.py" "$root"
     ;;
   restore)
     root="$(find_project_root "${1:-$PWD}")" || root="${1:-$PWD}"
-    python3 "$VAULT/kuraka-restore.py" "$root"
+    "$PY" "$VAULT/kuraka-restore.py" "$root"
     ;;
-  inspect)    python3 "$VAULT/kuraka-inspect.py" "${1:-$PWD}" ;;
-  discover)   python3 "$VAULT/kuraka-discover.py" "$@" ;;
-  dashboard)  python3 "$VAULT/aggregate-telemetry.py" "${1:-$PWD}" ;;
+  inspect)    "$PY" "$VAULT/kuraka-inspect.py" "${1:-$PWD}" ;;
+  discover)   "$PY" "$VAULT/kuraka-discover.py" "$@" ;;
+  dashboard)  "$PY" "$VAULT/aggregate-telemetry.py" "${1:-$PWD}" ;;
   validate)   bash "$VAULT/validate-kuraka.sh" "${1:-$PWD}" ;;
   doctor)
     echo "🩺 kuraka doctor"

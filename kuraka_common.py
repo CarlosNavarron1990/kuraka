@@ -83,7 +83,7 @@ def git_branch(project: Path) -> str:
     try:
         out = subprocess.run(
             ["git", "-C", str(project), "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
         )
         if out.returncode == 0:
             return out.stdout.strip() or "(detached)"
@@ -252,7 +252,7 @@ def _matches_vault_history(vault: Path, rel: str, file_hash: str,
     try:
         commits = subprocess.run(
             ["git", "log", "--format=%H", "--", rel],
-            capture_output=True, text=True, cwd=vault, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=vault, check=False,
         ).stdout.split()
     except OSError:
         return False

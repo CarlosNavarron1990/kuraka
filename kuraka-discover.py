@@ -88,7 +88,7 @@ def register(vault: Path, project: Path) -> bool:
     if not init.exists():
         return False
     r = subprocess.run([sys.executable, str(init), "--target", str(project),
-                        "--register-only", "--yes"], capture_output=True, text=True)
+                        "--register-only", "--yes"], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return r.returncode == 0
 
 

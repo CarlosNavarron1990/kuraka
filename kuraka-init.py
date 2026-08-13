@@ -138,7 +138,7 @@ def run_inspect(vault: Path, target: Path) -> dict:
     try:
         out = subprocess.run(
             [sys.executable, str(script), str(target)],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
         )
         return json.loads(out.stdout) if out.stdout.strip() else {}
     except (json.JSONDecodeError, OSError) as e:

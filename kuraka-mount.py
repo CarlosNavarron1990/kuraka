@@ -86,7 +86,7 @@ def capture_py(script: str, *args: str) -> str:
     try:
         r = subprocess.run([sys.executable, str(path), *args],
                            env=dict(os.environ, KURAKA_VAULT=str(VAULT), PYTHONIOENCODING="utf-8"),
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
         return r.stdout
     except OSError:
         return ""

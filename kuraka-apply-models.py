@@ -27,6 +27,10 @@ import re
 import sys
 from pathlib import Path
 
+if sys.platform == "win32":
+    for _s in (sys.stdout, sys.stderr):
+        _s.reconfigure(encoding="utf-8")
+
 VAULT = Path(__file__).resolve().parent
 ROUTING = VAULT / "MODEL-ROUTING.yaml"
 AGENTS_DIR = VAULT / "agents"
