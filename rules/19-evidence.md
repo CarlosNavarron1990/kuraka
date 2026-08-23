@@ -1,6 +1,5 @@
 ---
 description: "Evidence rules for every Kuraka agent and the orchestrator: behavior claims cite the executable body; non-existence claims carry a positive control; frozen-artifact edits fix the body first, the summary last."
-alwaysApply: true
 ---
 
 # Rule 19 — Evidence (R-CUERPO · R-CONTROL · R-ESPEJO)

@@ -1,6 +1,8 @@
 ---
 name: gap-analysis
 description: "Produce a pre-REQ gap analysis document that bridges a source codebase (current state) and a target architecture (desired state). Use this skill WHENEVER the user mentions migration, refactor, port, rewrite, modernization, or version upgrade between two explicit codebases — including phrases like 'migrate X from v1 to v2', 'analyze existing module for refactor', 'compare module A vs module B', 'gap analysis', 'feasibility study', 'pre-REQ research'. Output is a structured document with Parts A (origin analysis), B (target patterns), C (bridge mapping), D (next-phase recommendations) that feeds into Kuraka Phase 1. Invokable by po-analyst, amauta, or architect-reviewer. Always prefer this skill over writing a formal REQ when the input is a migration/refactor ticket — the formal REQ comes AFTER the gap analysis."
+user-invocable: false
+context: fork
 ---
 
 # Gap Analysis — Pre-REQ Bridge Document

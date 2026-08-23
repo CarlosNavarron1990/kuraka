@@ -3,6 +3,8 @@ name: generate-unit-tests
 description: "Generate unit tests for services, repositories, and models. Uses the project's test framework with AAA pattern, mocks dependencies, follows the stack profile's conventions."
 agent: "`test-engineer`"
 phase: "6 — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Generate Unit Tests

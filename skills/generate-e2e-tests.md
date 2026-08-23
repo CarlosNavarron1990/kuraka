@@ -3,6 +3,8 @@ name: generate-e2e-tests
 description: "Generate Playwright E2E tests for critical user flows. Focus on golden path, not exhaustive coverage. Used in Phase 6.5."
 agent: "`e2e-tester`"
 phase: "6.5 — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Generate E2E Tests

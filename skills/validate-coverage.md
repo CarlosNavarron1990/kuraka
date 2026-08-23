@@ -3,6 +3,8 @@ name: validate-coverage
 description: "Validate test coverage after generating tests. Runs lint + tests, identifies gaps, reports coverage metrics."
 agent: "`test-engineer`"
 phase: "6 — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Validate Coverage

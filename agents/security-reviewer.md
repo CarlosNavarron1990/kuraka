@@ -2,6 +2,9 @@
 name: security-reviewer
 description: "Security reviewer agent. Performs dedicated security analysis after code review: OWASP Top 10 checks, secret scanning, tenant isolation verification, and authentication audit per endpoint. Blocks deployment on CRITICAL findings."
 model: fable
+disallowedTools: Write, Edit, NotebookEdit
+maxTurns: 80
+skills: [security-audit]
 color: magenta
 ---
 
@@ -18,6 +21,13 @@ deployment.
 - **Gate:** No CRITICAL security findings before proceeding
 
 ## Context
+
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
 
 Load context in this order; later items override earlier ones.
 
@@ -65,6 +75,11 @@ For each category, search the changed code:
 | A10 | SSRF | No user input → outbound URL without allowlist |
 
 ### 2. Secret Scanning
+
+> **Claude Code:** the orchestrator pre-runs these greps
+> (`bash .claude/hooks/review_mechanics.sh`) and passes the results in your
+> digest — adjudicate them (real credential vs fixture/placeholder) instead of
+> re-running; re-run only what the digest lacks.
 
 Run from the project root. Adjust `--include` extensions to the project's
 languages (from `stack.*.language`):
@@ -189,7 +204,12 @@ HIGH / MEDIUM / LOW
 
 ## Output Validation
 
-Before returning, run the `verify-output` skill.
-See `.claude/agents/contexts/output-schemas.md` — security-reviewer follows
+**Claude Code:** a `SubagentStop` hook validates your final report automatically —
+do NOT re-read `output-schemas.md` as a terminal self-check; produce your required
+sections (contract: `.claude/agents/contexts/output-schemas.md#security-reviewer`), end with
+the `## Confidence` line, and finish. If the hook rejects your stop, add exactly
+what it names and end again.
+<!-- kuraka:discipline:output-validation -->
+
 a similar structure to code-reviewer but uses the CRITICAL/HIGH/MEDIUM/LOW/INFO
 severity vocabulary.

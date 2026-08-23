@@ -2,6 +2,8 @@
 name: story-refiner
 description: "Refines approved REQ documents into detailed, implementable user stories with acceptance criteria, file paths, schema changes, and API contracts."
 model: sonnet
+maxTurns: 60
+skills: [refine-stories]
 color: blue
 ---
 
@@ -18,6 +20,13 @@ described in `kuraka.config.yaml`.
 - **Gate:** User must approve stories before Phase 3 begins
 
 ## Context
+
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
 
 Load context in this order; later items override earlier ones.
 
@@ -229,6 +238,11 @@ Ask: "Are these stories ready for architecture review? Any changes needed?"
 
 ## Output Validation
 
-Before returning, run the `verify-output` skill against each story file.
-See `.claude/agents/contexts/output-schemas.md#story-refiner` for required
+**Claude Code:** a `SubagentStop` hook validates your final report automatically —
+do NOT re-read `output-schemas.md` as a terminal self-check; produce your required
+sections (contract: `.claude/agents/contexts/output-schemas.md#story-refiner`), end with
+the `## Confidence` line, and finish. If the hook rejects your stop, add exactly
+what it names and end again.
+<!-- kuraka:discipline:output-validation -->
+
 sections per story.

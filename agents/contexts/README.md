@@ -1,10 +1,32 @@
 # Agent Context Snapshots
 
 Condensed rule references per agent type. Each agent reads ONLY its relevant
-rules instead of all 16 files — this reduces token consumption by ~60-70%
+rules instead of the whole `rules/` directory — this reduces token consumption
 per agent invocation.
 
-## Rule-to-Agent Mapping
+## Two tiers of rules — check existence before mapping
+
+- **Framework rules (16–19)** — ship with every Kuraka mount and are ALWAYS
+  present in a consumer project: `16-agent-backup`,
+  `17-kuraka-token-optimizations`, `18-duplication-aware-refactor`,
+  `19-evidence` (plus `18-migrations-ddl-only` / `19-docs-process-repo-root`
+  where mounted).
+- **Project rules (01–15)** — owned by the consumer project's own git; they do
+  **NOT** ship with the framework and exist only in projects that define them
+  (historically sie_v2). **Before following any 01–15 row below, run
+  `ls .claude/rules/` and skip rows whose file is absent** — do not search for
+  or request missing files; their absence is normal, not an error.
+
+## Framework rule-to-agent mapping (always valid)
+
+| Rule | Applies to |
+|------|-----------|
+| 16-agent-backup | `final-auditor`, orchestrator |
+| 17-kuraka-token-optimizations | orchestrator (shapes every subagent prompt; agents don't read it directly) |
+| 18-duplication-aware-refactor | `backend-developer`, `frontend-developer`, `code-reviewer` |
+| 19-evidence | ALL agents + the orchestrator's own artifacts |
+
+## Project rule-to-agent mapping (only where the files exist)
 
 > `pentest-auditor` (Qhawaq) is a standalone, on-demand **whole-app** security
 > auditor (CSRF / TLS / session / SQLi / access control). It is NOT a Kuraka
@@ -29,7 +51,6 @@ per agent invocation.
 | 13-db-migrations | | x | x | | x | | | | | |
 | 14-incident-integration | | | | | | | | | | |
 | 15-data-mapping-specs | | | | | | | | | | |
-| 16-agent-backup | | | | | | | | | x | |
 
 `*` = only when the change touches that domain (providers, frontend, insurance APIs)
 
@@ -41,4 +62,4 @@ Agents reference their context file in the "Context" section:
 Read: `.claude/agents/contexts/{agent}-rules.md` for the list of rules to read.
 ```
 
-Last updated: 2026-04-17
+Last updated: 2026-08-22

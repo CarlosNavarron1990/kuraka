@@ -1,6 +1,8 @@
 ---
 name: kuraka-policies
 description: "Cross-cutting Kuraka policies: retry, timeout, token budget, failure fallback, checkpointing, and telemetry. Applies in any mode."
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Kuraka — Policies
@@ -62,13 +64,25 @@ before gating.
 mtimes of its FIRST files, gated mid-flight, and its half-written state read as
 failure. It was alive and finished green minutes later.
 
+*(Claude Code: don't hand-poll — at Phase-4 start launch the streaming watcher
+`bash .claude/hooks/liveness_watch.sh <authorized paths>` via the Monitor tool
+or a background Bash task; activity lines = healthy. The manual protocol above
+stays the DECISION rule for what silence means. For long L-size stories, prefer
+launching the implementer as a background subagent and reacting to its
+completion notification instead of waiting synchronously.)*
+
 ### Timeout policy
 
-- **Max 10 minutes per invocation** (`duration_ms > 600_000`).
-- **Timeout escalates to the user**: "Agent {agent} has been running 10+
-  min. Continue, abort, or change strategy?"
-- **Legitimate long tasks**: rare. If you expect to exceed 10 min, split
-  the task into smaller units.
+- **There is NO fixed wall-clock timeout.** Health is judged by the liveness
+  protocol above (poll the authorized files, ≥ 2 polls ≥ 10 minutes apart) —
+  never by duration. A healthy agent has run 7+ hours (REQ-20260801) while a
+  duration-based rule would have killed it mid-flight.
+- **Escalate to the user only when liveness fails** (zero file modifications
+  across ≥ 2 spaced polls): "Agent {agent} shows no activity in its authorized
+  paths for {N} min across {M} polls. Continue waiting, abort, or change
+  strategy?" — and snapshot the tree before any intervention.
+- **Long tasks are legitimate**; still prefer splitting stories into smaller
+  units when the surface allows it (baby steps, Phase 4 rule).
 
 ### Failure fallback (3 failed attempts)
 
@@ -147,17 +161,16 @@ routine.
 
 ## Gate command integrity (MANDATORY)
 
-When a test / typecheck result is the gate for advancing a story or phase,
-run the gate command WITHOUT a pipe and assert on **its own** exit code
-(e.g. `make test-run`, then check `$?`). NEVER pipe the gate command
-(`make ... | tail`, `... | head`, `... | grep`) — the shell reports the
-LAST command's exit code (the pipe's), so a failing suite can read as
-green. If output must be trimmed, redirect to a file and read the file;
-the gate still reads the test command's own exit code.
+A gate result (test / lint / typecheck) counts only when the gate command ran
+UNPIPED and the verdict cites **its own** exit code. See
+`rules/17-kuraka-token-optimizations.md` Rule T7 for the full rule (dead
+gates, isolated guard tests).
 
-Reference: REQ-20260611 S3 advanced on a FALSE GREEN (`make ... | tail`)
-while the suite was failing at collection (Sentry/jinja2 infra bug). See
-`rules/17-kuraka-token-optimizations.md` Rule T7.
+*(Claude Code: enforced by harness — the `gate_integrity` PreToolUse hook
+blocks any Bash command that pipes a configured `test_cmd`/`lint_cmd`/
+`typecheck_cmd`; user-approved exception: `KURAKA_GATE_PIPE_OK` marker in the
+command.)*
+<!-- kuraka:discipline:gate-integrity -->
 
 ---
 
@@ -314,6 +327,15 @@ Every `Agent` invocation returns a `<usage>` block with `total_tokens`,
 `tool_uses`, and `duration_ms`. You MUST append it to a telemetry JSON
 so the `final-auditor` (Phase 7) can analyze consumption by agent.
 
+*(Claude Code: capture COMPLETENESS is enforced by harness — the
+`telemetry_append` PostToolUse hook appends every subagent run to
+`agent-telemetry/HOOK-LOG.jsonl` automatically. Your job is to ENRICH each
+run into the REQ's telemetry JSON below — phase, `budget_ok`, `tool_uses_ok`,
+`resumed`/`tokens_incremental` — and, at Phase 7, reconcile the curated JSON
+against HOOK-LOG.jsonl: any run present in the log but missing from the JSON
+is a debt to justify.)*
+<!-- kuraka:discipline:telemetry -->
+
 **File**:
 `${architecture.paths.docs_process_root}/agent-telemetry/{REQ-name}-telemetry.json`
 
@@ -377,16 +399,16 @@ block it.
 
 ## Model Routing
 
-Each agent has a model assigned in its frontmatter according to cost / judgment:
+Model↔agent assignments are governed centrally in the vault's
+`MODEL-ROUTING.yaml` (capability tiers: `frontier` / `heavy` / `balanced` /
+`fast`, mapped per platform) and applied by `kuraka-apply-models.py`.
 
-| Model | Agents | Why |
-|---|---|---|
-| **opus** | `po-analyst`, `architect-reviewer`, `security-reviewer`, `final-auditor` | Complex reasoning, multiple sources, strategic judgment |
-| **sonnet** | `story-refiner`, `backend-developer`, `frontend-developer`, `code-reviewer`, `test-engineer` | Balanced implementation and review |
-| **haiku** | `deployment-verifier`, `pattern-detector`, `migration-reviewer`, `e2e-tester` | Mechanical checks, pattern matching, smoke tests — much cheaper than sonnet |
-
-Changing a model: edit `model:` in the corresponding agent's frontmatter
-and restart Claude Code so it re-registers the subagent.
+- **NEVER hand-edit a `model:` frontmatter line** — change the agent's tier in
+  the map and re-run the apply script (`--check` flags drift).
+- The authoritative current assignment is each agent's frontmatter *after*
+  apply; the judgment GATES (po-analyst, architect-reviewer, code-reviewer,
+  security-reviewer, final-auditor) ride the `frontier` tier.
+- After a model change, restart Claude Code so the subagent re-registers.
 
 ---
 

@@ -1,7 +1,9 @@
 ---
 name: deploy-diagnostician
-description: "Agente de deploy del ayllu Kuraka. Dos modos: (RUNBOOK) elabora y mantiene la documentación de despliegue por proyecto — prerequisitos, artefactos, pasos por entorno, matriz config-vs-binario, checklist de verificación y rollback; (DIAGNOSE) diagnostica fallos de despliegue/runtime rápido — localiza dónde surge el error ANTES de teorizar, cruza el síntoma con el catálogo de errores comunes (skill diagnose-deploy), y entrega causa raíz + fix + la línea de log que lo prueba. Realimenta el catálogo con cada error nuevo. Reutilizable por proyecto/incidente. Codename ayllu: Chaski (quechua: el chasqui, mensajero-corredor que entrega por los caminos)."
+description: "Two modes: maintain per-project deployment runbooks (RUNBOOK), or diagnose deploy/runtime failures by locating the error before theorizing (DIAGNOSE). Use for deployment docs or when a deployment breaks."
 model: opus
+maxTurns: 80
+skills: [diagnose-deploy]
 color: cyan
 ---
 

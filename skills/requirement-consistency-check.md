@@ -1,6 +1,8 @@
 ---
 name: requirement-consistency-check
 description: "Detect inconsistencies, ambiguity, hidden reversible decisions and scope gaps in a requirement BEFORE any analysis or implementation, and force a user clarification when a finding is blocking. Use this skill as the FIRST step of Kuraka Phase 1 (before analyze-requirement / gap-analysis) for every ticket, and again whenever the user expands scope mid-cycle ('ahora también X', 'te faltó Y', 'hay algo más'). Triggers: any new requirement, fragmented/incremental asks, migration/refactor/externalize/encrypt/cleanup requests, or contradictory instructions. Invokable by po-analyst, amauta, architect-reviewer. Output is a CLARIFY block, not a REQ — the REQ comes AFTER all BLOCKERs are resolved with the user."
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Requirement Consistency Check — pre-analysis clarification gate

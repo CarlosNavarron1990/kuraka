@@ -3,6 +3,8 @@ name: run-audit
 description: "Run final audit / retrospective after completing a development cycle. Analyzes rework causes, agent failures, and produces improvement recommendations. Used in Phase 7."
 agent: "`final-auditor`"
 phase: "7 — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Run Audit

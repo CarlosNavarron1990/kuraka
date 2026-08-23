@@ -1,12 +1,13 @@
 ---
-description: "Update the mounted Kuraka framework in THIS project from the vault (new/updated agents, skills, commands, templates). Portable: resolves the vault from $KURAKA_VAULT and auto-detects the project root via .claude/. Safe: rsync --update never touches kuraka.config.yaml, .claude/project/, or docs/. Requires a Claude Code restart afterward."
+description: "Update the mounted Kuraka framework in THIS project from the vault (agents with harness capabilities, SKILL.md skills, hooks, rules, contexts, stack-profiles, templates, tests/kuraka). Uses the mount's --update mode: non-interactive, preserves overrides, and NEVER touches project history (docs/process/**, checkpoints, .claude/project/, kuraka.config.yaml). Requires a Claude Code restart afterward."
 ---
 
 # Task: Update Kuraka framework in this project
 
-Re-mount the Kuraka vault into the current project so it picks up new and
-updated framework files (agents, skills, commands, contexts, stack-profiles,
-templates) — without touching project-specific content.
+Refresh the framework layer from the vault using the mount's dedicated
+`--update` mode — it updates agents, skills, commands, rules, hooks and
+artifacts, re-applies the project's overrides, and by design cannot touch
+implementation history or project-specific content.
 
 **Portability**: the vault location is NOT hardcoded. It is read from the
 `KURAKA_VAULT` environment variable, falling back to the author's default
@@ -44,11 +45,12 @@ if [ ! -d "$VAULT" ]; then
   exit 1
 fi
 
-# --- find project root = nearest ancestor (incl. $PWD) containing .claude/ ---
+# --- find project root = nearest ancestor (incl. $PWD) with ANY mounted platform ---
 DIR="$PWD"
-while [ "$DIR" != "/" ] && [ ! -d "$DIR/.claude" ]; do DIR="$(dirname "$DIR")"; done
-if [ ! -d "$DIR/.claude" ]; then
-  echo "❌ No hay un proyecto con .claude/ desde: $PWD"
+has_platform() { [ -d "$1/.claude/agents" ] || [ -d "$1/.agents/agents" ] || [ -d "$1/.codex/agents" ] || [ -d "$1/.cursor/agents" ]; }
+while [ "$DIR" != "/" ] && ! has_platform "$DIR"; do DIR="$(dirname "$DIR")"; done
+if ! has_platform "$DIR"; then
+  echo "❌ No hay un proyecto con Kuraka montado (.claude/.agents/.codex/.cursor) desde: $PWD"
   echo "   Corre /kuraka-update dentro de un proyecto que ya tenga Kuraka montado."
   exit 1
 fi
@@ -58,12 +60,22 @@ echo "🪢 vault:    $VAULT"
 echo "🪢 proyecto: $PROJECT_ROOT"
 echo ""
 
-# --- mount (rsync --update: only newer vault files; never touches project content) ---
-bash "$VAULT/mount-kuraka.sh" "$PROJECT_ROOT"
+# --- framework-only refresh (non-interactive; history untouched by design) ---
+bash "$VAULT/mount-kuraka.sh" "$PROJECT_ROOT" --update
 ```
 
-This does **NOT** modify `kuraka.config.yaml`, `.claude/project/`
-(conventions, lessons-learned, glossary, promoted experts), or `docs/`.
+The `--update` mode guarantees it does **NOT** modify `kuraka.config.yaml`,
+`.claude/project/` (conventions, lessons-learned, glossary, promoted experts),
+`docs/process/**` (REQ, stories, checkpoints, retros, telemetry,
+lessons-learned), or the vault registry — and it re-applies your
+project-specific overrides after the copy (the override always wins).
+
+**Platform-aware**: without `--target`, the mode auto-detects which platform(s)
+are already mounted in the project (`.claude` / `.agents` / `.codex` /
+`.cursor`) and refreshes EACH with its own render — Claude-only material
+(harness frontmatter, hooks, SKILL.md invocability keys) never reaches
+Antigravity/Codex/Cursor, and vice versa. It refuses to first-mount a platform
+that isn't there (use the full mount for that).
 
 ### 3. Report what changed
 

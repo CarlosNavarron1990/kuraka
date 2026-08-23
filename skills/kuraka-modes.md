@@ -1,6 +1,8 @@
 ---
 name: kuraka-modes
 description: "Kuraka workflow variants (Bootstrap, Brownfield, Lite, Retroactive, Reduced-by-risk). Defines when to use each based on project type or change surface."
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Kuraka — Modes
@@ -211,7 +213,7 @@ If ANY fails → **NOT Lite**.
 |------------|--------|----------|
 | L1 | `po-analyst` (mode: LITE_COMBINED) | Phase 1 + 2 + 2.5 |
 | L2 | `backend-developer` / `frontend-developer` | Phase 4 |
-| L3 | `code-reviewer` + writes tests | Phase 3 + 5 + 6 + 7 |
+| L3 | `code-reviewer` (+ the L2 agent for any missing tests) | Phase 3 + 5 + 6 + 7 |
 
 **Phases omitted** (justification inherent to the mode):
 - Phase 3 (Architect) — L3 review covers it.
@@ -248,8 +250,13 @@ Gate: files modified + tests passing.
 
 Agent: `code-reviewer` (mode: LITE_FINAL). A single invocation does:
 1. 6D code review.
-2. Generate tests if the developer didn't write them.
-3. Short RETRO only if there's a preventable lesson.
+2. List any missing tests as findings with a concrete one-line assertion
+   each. The reviewer does NOT write the tests (its harness denies
+   Write/Edit, and a reviewer authoring the tests it then approves breaks
+   role isolation) — the orchestrator routes the missing tests as a micro
+   pass to the L2 agent (`backend-developer` / `frontend-developer`).
+3. Short RETRO only if there's a preventable lesson — returned as report
+   content; the orchestrator persists it (docs are its legitimate exception).
 
 Output: review report with verdict + short RETRO (optional).
 

@@ -2,6 +2,8 @@
 name: frontend-developer
 description: "Frontend developer agent. Implements approved stories for the project's frontend stack (defined in kuraka.config.yaml and the matching stack profile). Counterpart of backend-developer for the frontend layer."
 model: sonnet
+maxTurns: 100
+skills: [implement-story]
 color: blue
 ---
 
@@ -23,6 +25,13 @@ in parallel when stories are independent and
 `workflow.parallel_implementation: true`.
 
 ## Context
+
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
 
 Load context in this order; later items override earlier ones.
 
@@ -184,8 +193,13 @@ limits struck — harmlessly, because the orchestrator owned verification).
 
 ## Output Validation
 
-Before returning, run the `verify-output` skill against your completion
-report. See `.claude/agents/contexts/output-schemas.md#backend-developer`
+**Claude Code:** a `SubagentStop` hook validates your final report automatically —
+do NOT re-read `output-schemas.md` as a terminal self-check; produce your required
+sections (contract: `.claude/agents/contexts/output-schemas.md#frontend-developer`), end with
+the `## Confidence` line, and finish. If the hook rejects your stop, add exactly
+what it names and end again.
+<!-- kuraka:discipline:output-validation -->
+
 for required sections (same schema applies to frontend — replace backend
 commands with their frontend equivalents from `stack.frontend.*`).
 

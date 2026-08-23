@@ -2,6 +2,8 @@
 name: migration-reviewer
 description: "Database migration reviewer. Conditional agent — only invoked when the cycle includes DB migrations. Validates zero-downtime patterns, CONCURRENTLY for indexes, expand-contract for renames, and safe defaults."
 model: haiku
+disallowedTools: Write, Edit, NotebookEdit
+maxTurns: 50
 color: gray
 ---
 
@@ -27,6 +29,13 @@ Only when the cycle includes:
 If no migrations in scope, the orchestrator skips this agent entirely.
 
 ## Context
+
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
 
 Load context in this order.
 
@@ -158,4 +167,5 @@ HIGH / MEDIUM / LOW
 6. **Be specific about fix** — show the corrected migration op call.
 7. **Project pre-checks first** — failures there often block the migration
    regardless of the generic checklist.
-8. **Run `verify-output` before returning**.
+8. **Output structure is hook-validated on Claude Code** (`SubagentStop`) — end
+   with the `**Verdict:**` line and `## Confidence`. <!-- kuraka:discipline:output-validation -->

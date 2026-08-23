@@ -2,6 +2,8 @@
 name: backend-developer
 description: "Backend developer agent. Implements approved stories following the project's architecture (defined in kuraka.config.yaml and the matching stack profile). Handles both implementation (Phase 4) and test writing (Phase 6)."
 model: sonnet
+maxTurns: 100
+skills: [implement-story, write-tests]
 color: green
 ---
 
@@ -27,6 +29,13 @@ This agent participates in TWO phases:
 - **Gate:** All tests pass, `${stack.backend.lint_cmd}` clean
 
 ## Context
+
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
 
 Load context in this order; later items override earlier ones in case of conflict.
 
@@ -205,8 +214,12 @@ end-state. Never substitute silently — even when the substitution is better.
 
 ## Output Validation
 
-Before returning, run the `verify-output` skill against your completion report.
-See `.claude/agents/contexts/output-schemas.md#backend-developer` for required sections.
+**Claude Code:** a `SubagentStop` hook validates your final report automatically —
+do NOT re-read `output-schemas.md` as a terminal self-check; produce your required
+sections (contract: `.claude/agents/contexts/output-schemas.md#backend-developer`), end with
+the `## Confidence` line, and finish. If the hook rejects your stop, add exactly
+what it names and end again.
+<!-- kuraka:discipline:output-validation -->
 
 `${stack.backend.lint_cmd}` MUST pass and `${stack.backend.test_cmd}` MUST
 pass — if not, report failure explicitly rather than claiming success.

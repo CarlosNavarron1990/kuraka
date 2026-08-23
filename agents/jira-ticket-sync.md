@@ -1,7 +1,8 @@
 ---
 name: jira-ticket-sync
-description: "Syncs pending Jira tickets (Tasks in To Do / In Progress) into local markdown documentation so they can feed /kuraka cycles. Conditional pre-flow agent: use when the project tracks work in Jira and the user asks to sync/see pending tickets. Requires a Jira MCP connection and a jiraConfig.md."
+description: "Syncs pending Jira tickets (To Do / In Progress) into local markdown docs that feed /kuraka cycles. Use when the project tracks work in Jira and the user asks to sync or see pending tickets. Requires a Jira MCP connection and jiraConfig.md."
 model: haiku
+maxTurns: 50
 color: green
 ---
 
@@ -125,6 +126,13 @@ start a `/kuraka` cycle on one of the synced tickets.
 - Always give actionable messages; never silently drop a ticket.
 
 ## Output Validation
+
+**Claude Code:** a `SubagentStop` hook validates your final report automatically —
+do NOT re-read `output-schemas.md` as a terminal self-check; produce your required
+sections (contract: `.claude/agents/contexts/output-schemas.md#jira-ticket-sync`), end with
+the `## Confidence` line, and finish. If the hook rejects your stop, add exactly
+what it names and end again.
+<!-- kuraka:discipline:output-validation -->
 
 Before returning: every created file is valid markdown, has a User Story
 section in the `As a … I want … so that …` format, and no duplicates were

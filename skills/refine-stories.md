@@ -3,6 +3,8 @@ name: refine-stories
 description: "Break an approved REQ document into detailed implementable user stories. Used by story-refiner agent in Phase 2 of the workflow."
 agent: "`story-refiner`"
 phase: "2 — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Refine Stories

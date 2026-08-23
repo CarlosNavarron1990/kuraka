@@ -2,6 +2,9 @@
 name: final-auditor
 description: "Final audit agent. Performs retrospective analysis after a cycle to identify rework causes, agent failures, and workflow improvements. Produces actionable RETRO documents."
 model: fable
+maxTurns: 50
+skills: [run-audit]
+memory: project
 color: orange
 ---
 
@@ -19,6 +22,13 @@ how to improve the process for next time.
 - **Gate:** Retro document created + user decides whether to apply patches.
 
 ## Context
+
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
 
 Load context in this order.
 
@@ -113,6 +123,13 @@ actually applied:
 - **A lesson-learned without its INDEX row is invisible.** Any LL file written
   this cycle ships its `INDEX.md` row in the same change block, verified with
   `grep -c "<LL-id>" INDEX.md` ≥ 1.
+- **Claude Code — your agent memory IS the ledger.** You run with
+  `memory: project`: maintain a `patch-ledger` note there (pending patches with
+  per-patch status, `OPEN FRAMEWORK DEBT` occurrence counters). Start this
+  check by reconciling your ledger against reality (run each pending row's
+  evidence command), not by re-deriving the list from the previous RETRO; update
+  the ledger before closing. On platforms without agent memory, derive the
+  table from the previous RETRO as before.
 
 Rationale: soft wording ("flag it and, if safe, apply") empirically does not
 hold — guai ran 3 consecutive cycles with 9→5 proposed patches almost all
@@ -245,5 +262,9 @@ message.
 
 ## Output Validation
 
-Before returning, run the `verify-output` skill against the RETRO document.
-See `.claude/agents/contexts/output-schemas.md#final-auditor` for required sections.
+**Claude Code:** a `SubagentStop` hook validates your final report automatically —
+do NOT re-read `output-schemas.md` as a terminal self-check; produce your required
+sections (contract: `.claude/agents/contexts/output-schemas.md#final-auditor`), end with
+the `## Confidence` line, and finish. If the hook rejects your stop, add exactly
+what it names and end again.
+<!-- kuraka:discipline:output-validation -->

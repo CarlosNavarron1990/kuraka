@@ -1,6 +1,8 @@
 ---
 name: kuraka
 description: "Development orchestrator (kuraka, from Quechua *kuraq* — 'the elder'). Multi-agent workflow for end-to-end requirements: PO analysis → Story refinement → Test planning → Architect review → Implementation → Code review → Security → Tests → E2E → Deployment → Final audit. Scales the pipeline to the change's risk — see `kuraka-modes`."
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Kuraka — Development Orchestrator
@@ -115,6 +117,24 @@ diff at the Phase 1 gate instead of absorbing it.
 | Phase | Agent | Condition |
 |-------|-------|-----------|
 | 5 (sub) | `migration-reviewer` | Only if there are files in `${architecture.paths.migrations_root}` |
+
+### On-demand agents (outside the phase map)
+
+These agents are NOT part of any cycle phase. Invoke them only on their
+trigger; never substitute them for a phase agent.
+
+| Agent | Invoke when | Never as a substitute for |
+|-------|-------------|---------------------------|
+| `pentest-auditor` | The user asks for a whole-app security audit / pentest | Phase 5.5 (`security-reviewer` owns the cycle diff) |
+| `sentry-resolver` | The user asks to triage / review Sentry issues | — |
+| `deploy-diagnostician` | Deploy runbook work, or a deploy/runtime failure to diagnose | Phase 6.7 (`deployment-verifier` owns pre-release config checks) |
+| `provider-contract-validator` | Validating/migrating a provider API contract (Postman ↔ spec ↔ code) | — |
+| `migration-deployability` | Before merging a branch with migrations into a deployment branch | Phase 5 sub (`migration-reviewer` owns DDL quality) |
+| `checkmarx-remediation` | A Checkmarx One scan needs analysis / a remediation plan | — |
+| `jira-ticket-sync` | The project tracks work in Jira and the user asks to sync/see pending tickets | Phase 1 (it feeds `po-analyst`, doesn't replace it) |
+
+Entry agents (`inti` → `arki` for greenfield, `amauta` for brownfield) run
+once per project — see `kuraka-modes.md` (Bootstrap / Brownfield).
 
 ---
 
@@ -420,11 +440,11 @@ with no exceptions for "the change is trivial".
 stories, test plans, retros) and Kuraka system files (`.claude/skills/`,
 `.claude/agents/`, `.claude/rules/`).
 
-**Protocol if violated**:
-1. Revert the change.
-2. Announce the violation to the user.
-3. Route through the correct agent.
-4. Log the bypass in telemetry with `"agent": "orchestrator-direct"`.
+*(Claude Code: enforced by harness — the `orchestrator_guard` PreToolUse hook
+blocks main-session writes under the configured code roots; the documented
+user-approved exception is a one-shot `touch .claude/hooks/ALLOW-ORCH-WRITE`.
+Do not spend turns policing this yourself.)*
+<!-- kuraka:discipline:orchestrator-writes -->
 
 This constraint was added after retros where the bypass produced type
 errors and broken telemetry.

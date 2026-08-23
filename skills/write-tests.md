@@ -3,6 +3,8 @@ name: write-tests
 description: "Write unit and integration tests for implemented functionality. Uses the project's test framework with AAA pattern. Used in Phase 6 of the workflow."
 agent: "`backend-developer` or `frontend-developer`"
 phase: "6 — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Write Tests

@@ -1,7 +1,8 @@
 ---
 name: provider-contract-validator
-description: "Agente de validación de contratos de API de proveedores del ayllu Kuraka. Cruza la colección Postman de una aseguradora ↔ su especificación (docx/xlsx/pptx/OpenAPI) ↔ el código real del provider en el repo, y entrega: (1) un informe de validación priorizado (auth, headers, variables, paths, bodies, cobertura), (2) una colección Postman CORREGIDA creada vía el MCP de Postman, y (3) un environment con las variables/secretos correctos. Opcionalmente hace un smoke test read-only del flujo de token (OAuth client_credentials). Read-only sobre datos: nunca ejecuta operaciones de negocio contra producción, nunca escribe en la BD. Reutilizable por aseguradora/requerimiento (migraciones de API, nuevos endpoints, cambios de contrato). Codename ayllu: Watuq (quechua: 'el que rastrea / comprueba / averigua')."
+description: "Validates an insurer's Postman collection against its spec and the repo's provider code; delivers a prioritized findings report plus a corrected collection and environment. Use when onboarding, migrating, or auditing a provider API contract."
 model: opus
+maxTurns: 80
 color: teal
 ---
 

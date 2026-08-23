@@ -3,6 +3,8 @@ name: detect-patterns
 description: "Detect recurring patterns across multiple RETROs. Produces a structural fix report (RECURRING-ISSUES.md) that goes beyond per-cycle patches. Run monthly or after 5+ RETROs."
 agent: "`pattern-detector`"
 phase: "cross-cycle — manual invocation"
+user-invocable: false
+context: fork
 ---
 
 # Detect Patterns

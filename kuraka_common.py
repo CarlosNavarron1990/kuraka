@@ -143,6 +143,55 @@ OVERRIDE_CATEGORIES = ("agents", "skills", "commands")
 MOUNT_MANIFEST_NAME = ".kuraka-mount-manifest.json"
 
 
+# --- Claude-only frontmatter keys ---------------------------------------------
+# The vault stores agent/skill frontmatter as the CLAUDE-NATIVE SUPERSET (the
+# `model:` precedent, extended by AGENT-HARNESS.yaml: tools/maxTurns/etc.).
+# Non-Claude renders (Antigravity, Cursor, Codex) SUBTRACT these keys at copy
+# time so a platform never receives harness fields it doesn't understand.
+# Claude renders stay byte-identical to the vault — that is what keeps
+# detect_overrides() a safe byte comparison. Never inject frontmatter at mount
+# time for the claude target.
+
+CLAUDE_ONLY_FRONTMATTER_KEYS = {
+    # subagent harness keys (AGENT-HARNESS.yaml)
+    "tools", "disallowedtools", "permissionmode", "maxturns", "skills",
+    "memory", "effort", "background", "isolation", "hooks", "mcpservers",
+    "initialprompt",
+    # skill frontmatter keys (Claude Code SKILL.md contract)
+    "disable-model-invocation", "user-invocable", "context",
+}
+
+
+def strip_claude_frontmatter(text: str) -> str:
+    """Remove Claude-Code-only keys from a Markdown file's YAML frontmatter.
+
+    Handles single-line values and indented/block continuations of a stripped
+    key. The body and all other frontmatter lines pass through untouched; text
+    without a frontmatter block is returned as-is."""
+    if not text.startswith("---"):
+        return text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text
+    kept: list[str] = []
+    skipping = False
+    for line in text[3:end].split("\n"):
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip(" "))
+        if skipping:
+            # continuation lines of a stripped key (indented, or list items)
+            if stripped and (indent > 0 or stripped.startswith("-")):
+                continue
+            skipping = False
+        if ":" in stripped and indent == 0:
+            key = stripped.split(":", 1)[0].strip().lower()
+            if key in CLAUDE_ONLY_FRONTMATTER_KEYS:
+                skipping = True
+                continue
+        kept.append(line)
+    return "---" + "\n".join(kept) + text[end:]
+
+
 def _file_hash(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
@@ -269,6 +318,16 @@ def _matches_vault_history(vault: Path, rel: str, file_hash: str,
     return False
 
 
+def _skill_dir_canonical(cat: str, rel: Path) -> "Path | None":
+    """The claude mount renders each vault skills/<n>.md ALSO as the registered
+    directory form skills/<n>/SKILL.md. For override purposes both project
+    copies canonicalize to the same vault baseline (skills/<n>.md) — without
+    this, every SKILL.md would read as a phantom custom override."""
+    if cat == "skills" and rel.name == "SKILL.md" and len(rel.parts) == 2:
+        return Path(rel.parts[0] + ".md")
+    return None
+
+
 def detect_overrides(project: Path, vault: Path, platform: str = "claude") -> list[Path]:
     """Relative paths (as `<cat>/<rel>`) under platform/<cat>/ whose content differs
     from the vault baseline, or that don't exist in the vault at all (custom
@@ -285,11 +344,12 @@ def detect_overrides(project: Path, vault: Path, platform: str = "claude") -> li
             if p.name.endswith(".append.md") or p.name.startswith("._"):
                 continue  # ._* = macOS AppleDouble metadata, never an override
             rel = p.relative_to(proj_cat)
-            base = vault_cat / rel
+            canon = _skill_dir_canonical(cat, rel)
+            base = vault_cat / (canon or rel)
             proj_hash = _file_hash(p)
             if base.exists() and proj_hash == _file_hash(base):
                 continue  # identical to current vault
-            key = (Path(cat) / rel).as_posix()
+            key = (Path(cat) / (canon or rel)).as_posix()
             if key in manifest and proj_hash == manifest[key]:
                 continue  # untouched since mount
             if key not in manifest and base.exists():
@@ -351,7 +411,28 @@ def restore_overrides(vault: Path, slug: str, project: Path, platform: str = "cl
             d.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(s, d)
             copied += 1
+    if platform == "claude":
+        copied += _mirror_claude_skill_copies(project / p_name / "skills")
     return copied
+
+
+def _mirror_claude_skill_copies(skills_root: Path) -> int:
+    """Keep the two claude skill copies coherent after a restore: the
+    registered directory form (skills/<n>/SKILL.md) is the source of truth;
+    when it differs from the transition flat copy (skills/<n>.md), the flat
+    copy is refreshed from it. Returns files rewritten."""
+    if not skills_root.is_dir():
+        return 0
+    fixed = 0
+    for d in sorted(skills_root.iterdir()):
+        sm = d / "SKILL.md"
+        if not (d.is_dir() and sm.is_file()):
+            continue
+        flat = skills_root / f"{d.name}.md"
+        if flat.exists() and flat.read_bytes() != sm.read_bytes():
+            shutil.copy2(sm, flat)
+            fixed += 1
+    return fixed
 
 
 # --- snapshot + cycle archiving (shared by kuraka-backup / kuraka-archive) ---

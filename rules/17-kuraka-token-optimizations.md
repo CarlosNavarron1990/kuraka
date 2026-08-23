@@ -1,6 +1,5 @@
 ---
 description: Token-saving prompt patterns for orchestrating the Kuraka. Reduces cycle cost ~35% on low-risk changes without sacrificing rigor.
-alwaysApply: true
 ---
 
 # Kuraka Token Optimizations

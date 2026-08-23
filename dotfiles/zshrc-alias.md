@@ -1,3 +1,30 @@
+# Aliases permanentes para `.zshrc`
+
+## `kuraka-update` — actualizar el framework en el proyecto actual (recomendado)
+
+Actualiza SOLO la capa de framework (agentes con capacidades de harness, skills
+`SKILL.md`, hooks, rules, contexts, stack-profiles, templates, tests/kuraka)
+desde el vault, re-aplica tus overrides y **jamás toca el historial del
+proyecto** (`docs/process/**`, checkpoints, `.claude/project/`,
+`kuraka.config.yaml`). No interactivo. Después: `/exit` + sesión nueva.
+
+**Consciente de plataforma**: detecta automáticamente qué plataforma(s) están
+montadas en el proyecto (`.claude` / `.agents` / `.codex` / `.cursor`) y
+refresca CADA una con su propio render — el material solo-Claude (frontmatter
+de harness, hooks, claves de invocabilidad) nunca llega a
+Antigravity/Codex/Cursor, y viceversa. Se niega a estrenar una plataforma no
+montada (para eso está el mount completo).
+
+```bash
+cat >> ~/.zshrc << 'EOF'
+# Kuraka — framework-only update en el proyecto actual (historial intacto)
+alias kuraka-update='bash "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/mount-kuraka.sh" "$PWD" --update'
+EOF
+source ~/.zshrc
+```
+
+---
+
 # Alias permanente `claude-sync` para `.zshrc`
 
 Este alias te permite restaurar `.claude/` y `scripts/sync-obsidian.sh` desde el vault

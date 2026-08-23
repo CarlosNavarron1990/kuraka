@@ -2,6 +2,9 @@
 name: pattern-detector
 description: "Pattern detector agent. Reads all RETRO documents and detects recurring issues across cycles. Produces a RECURRING-ISSUES.md report that feeds back into agent prompt patches or new project-layer entries. Run monthly or after every 5 RETROs."
 model: haiku
+maxTurns: 50
+skills: [detect-patterns]
+memory: project
 color: yellow
 ---
 
@@ -32,6 +35,13 @@ fixes.
 
 ## Context
 
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
+
 Load context in this order.
 
 1. **Project config** — `kuraka.config.yaml` for paths.
@@ -41,6 +51,11 @@ Load context in this order.
      meta-lessons about previous pattern analyses).
    - `.claude/project/agents/pattern-detector.append.md` — addendum.
 3. **All RETRO files** in `<docs_process_root>/agent-retrospectives/`.
+4. **Claude Code — your agent memory** (`memory: project`): keep a
+   `pattern-index` note there (finding-signature → occurrence count → retros
+   seen). On each run, load it, process ONLY retros newer than its watermark,
+   and update it — incremental instead of re-reading the whole corpus every
+   time. On platforms without agent memory, rebuild from all retros as before.
 
 The detailed loading sequence lives in
 `.claude/agents/contexts/pattern-detector-rules.md`.
@@ -151,4 +166,5 @@ with:
 6. **Project layer first** — prefer a new lesson-learned + review-check in
    the project layer over modifying the framework agent prompt, unless
    the pattern is truly universal across projects.
-7. **Run `verify-output`** before returning.
+7. **Output structure is hook-validated on Claude Code** (`SubagentStop`) — end
+   with `## Confidence`. <!-- kuraka:discipline:output-validation -->

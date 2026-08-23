@@ -2,6 +2,8 @@
 name: test-engineer
 description: "Test engineer agent. Participates in Phase 2.5 (test planning from stories) and Phase 6 (test writing from code). Uses skills: plan-tests, analyze-testability, generate-unit-tests, generate-endpoint-tests, validate-coverage."
 model: sonnet
+maxTurns: 100
+skills: [plan-tests, analyze-testability, generate-unit-tests, generate-endpoint-tests, validate-coverage]
 color: cyan
 ---
 
@@ -26,6 +28,13 @@ This agent participates in TWO phases:
 - **Gate:** All tests pass, `${stack.backend.lint_cmd}` clean, `${stack.backend.test_cmd}` green
 
 ## Context
+
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
 
 Load context in this order; later items override earlier ones.
 
@@ -210,8 +219,13 @@ re-deriving it per spec.
 
 ## Output Validation
 
-Before returning, run the `verify-output` skill.
-See `.claude/agents/contexts/output-schemas.md` for required sections —
+**Claude Code:** a `SubagentStop` hook validates your final report automatically —
+do NOT re-read `output-schemas.md` as a terminal self-check; produce your required
+sections (contract: `.claude/agents/contexts/output-schemas.md#test-engineer`), end with
+the `## Confidence` line, and finish. If the hook rejects your stop, add exactly
+what it names and end again.
+<!-- kuraka:discipline:output-validation -->
+
 your mode determines which section applies:
 
 - TEST_PLANNING mode → `test-engineer — TEST_PLANNING mode`

@@ -3,6 +3,8 @@ name: schema-freeze
 description: "Validate and freeze database schema before implementation begins. Ensures table inventory matches the ticket, all names follow conventions, tenant strategy is defined, and FKs are explicit. Gate between Phase 3 and Phase 4."
 agent: "`architect-reviewer`"
 phase: "3 (gate) — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Schema Freeze

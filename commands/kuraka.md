@@ -10,7 +10,7 @@ Arguments (requirement / Jira ticket / scope): $ARGUMENTS
 Steps:
 
 1. Read the orchestrator definition and its companion files, in this order:
-   - `.claude/skills/kuraka.md` — main orchestrator (11-phase multi-agent workflow)
+   - `.claude/skills/kuraka.md` — main orchestrator (8-phase multi-agent workflow, plus subphases)
    - `.claude/skills/kuraka-modes.md` — how to scale the pipeline to the change's risk
    - `.claude/skills/kuraka-policies.md` — execution policies and gates
 

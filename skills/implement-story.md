@@ -3,6 +3,8 @@ name: implement-story
 description: "Implement a single approved user story following the stack's idiomatic architecture. Creates models, schemas, repositories, services, endpoints, and migrations as needed. Used in Phase 4."
 agent: "`backend-developer` (or `frontend-developer` for frontend stories)"
 phase: "4 — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Implement Story

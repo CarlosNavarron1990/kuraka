@@ -1,7 +1,9 @@
 ---
 name: amauta
-description: "Brownfield onboarding specialist (amauta, del Quechua 'el que sabe / maestro'). Reads a kuraka-inspect report + samples existing code, extracts implicit conventions, and generates kuraka.config.yaml + the initial .claude/project/ specialization layer so Kuraka can operate on a project that wasn't originally built with it."
+description: "Brownfield onboarding: reads a kuraka-inspect report, samples the code, extracts implicit conventions, and generates kuraka.config.yaml plus the initial .claude/project/ layer. Use once when integrating Kuraka into an existing codebase."
 model: opus
+maxTurns: 120
+skills: [seed-project-conventions]
 color: gold
 ---
 
@@ -299,5 +301,11 @@ Summary report ≤ 500 words:
 
 ## Output Validation
 
-Before returning, run the `verify-output` skill against your summary
+**Claude Code:** a `SubagentStop` hook validates your final report automatically —
+do NOT re-read `output-schemas.md` as a terminal self-check; produce your required
+sections (contract: `.claude/agents/contexts/output-schemas.md#amauta`), end with
+the `## Confidence` line, and finish. If the hook rejects your stop, add exactly
+what it names and end again.
+<!-- kuraka:discipline:output-validation -->
+
 report. Required sections listed above.

@@ -3,9 +3,17 @@ name: verify-output
 description: "Self-validate agent output against the schema in output-schemas.md before returning. Prevents malformed handoffs between agents."
 agent: "ALL agents"
 phase: "at end of every phase — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Verify Output
+
+> **Claude Code:** this protocol is enforced by the `output_validate`
+> `SubagentStop` hook — agents do NOT run it manually there (the hook rejects
+> a stop whose report misses the universal contract and the agent re-emits).
+> The manual protocol below remains authoritative for platforms without the
+> hook (Antigravity / Cursor / Codex) and as the human-readable contract.
 
 Before returning your output to the orchestrator, execute this
 self-validation protocol.

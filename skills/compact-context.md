@@ -3,6 +3,8 @@ name: compact-context
 description: "Compress a verbose agent output into a summary before passing to the next agent. Prevents context bloat when one agent reads many files. Invoked automatically when previous output > 5000 tokens."
 agent: "orchestrator (automatic)"
 phase: "between phases — see `kuraka`"
+user-invocable: false
+context: fork
 ---
 
 # Compact Context

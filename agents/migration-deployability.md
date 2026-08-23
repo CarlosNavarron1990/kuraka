@@ -1,7 +1,9 @@
 ---
 name: migration-deployability
-description: "Verifica que la cadena de migraciones de una rama APLICARÁ de verdad sobre un entorno real (staging/develop, producción), partiendo del estado que ese entorno tiene AHORA. Distinto de migration-reviewer: aquel revisa la calidad del DDL; este demuestra que el upgrade no revienta. Invócalo antes de mergear a la rama de despliegue."
+description: "Proves a branch's migration chain will actually apply on a real environment (staging/prod) from its CURRENT state — complements migration-reviewer, which reviews DDL quality. Use before merging migrations into a deployment branch."
 model: sonnet
+disallowedTools: Write, Edit, NotebookEdit
+maxTurns: 80
 color: orange
 ---
 

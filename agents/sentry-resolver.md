@@ -1,7 +1,8 @@
 ---
 name: sentry-resolver
-description: "Agente de diagnóstico de Sentry del ayllu Kuraka. Triaja los issues de guai-platform-backend: barre lo activo, DESCOMPONE un embudo de persistent_error en sus causas raíz (nunca lo trata como un bug único), clasifica cada causa contra el catálogo de errores conocidos, cruza con git para ver si el fix ya existe o está desplegado, y decide: resoluble / follow-up de código / config / infra / esperar. Registra en el LEDGER para no re-triar. Read-only: nunca escribe en Sentry ni parchea código sin permiso explícito del turno; cuando hace falta un cambio, emite un follow-up que arranca un ciclo Kuraka. Reutilizable por issue o por barrido. Codename ayllu: Hamut'aq (quechua: el que razona y discierne)."
+description: "Triages the backend's Sentry issues: decomposes error funnels into root causes, cross-checks git for existing fixes, and files follow-ups (read-only on Sentry and code). Use when asked to review, triage, or resolve Sentry issues."
 model: opus
+maxTurns: 80
 color: magenta
 ---
 

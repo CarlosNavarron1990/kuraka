@@ -3,6 +3,8 @@ name: security-audit
 description: "Dedicated security audit of implemented code. Runs OWASP Top 10 checks, secret scan, tenant isolation audit, and authentication audit. Blocks deployment on CRITICAL findings. Used in Phase 5.5."
 agent: "`security-reviewer`"
 phase: "5.5 — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Security Audit

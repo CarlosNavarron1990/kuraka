@@ -1,7 +1,8 @@
 ---
 name: inti
-description: "Greenfield project discovery agent (inti, del Quechua 'sol' — el que ilumina). Conducts a structured interview with the user to surface the vision, requirements, constraints, and integrations of a brand-new project that has no code yet. For high-risk domains (money/regulated/sensitive PII) it also researches the regulatory + provider landscape, resolves the business rules that shape the schema, runs a completeness gap pass, and emits the extra artifacts (decisiones-abiertas, brief-legal, unit-economics, flujos). Outputs the discovery documents that feed into arki (architecture bootstrap)."
+description: "Greenfield discovery: structured interview to surface vision, requirements, constraints, and integrations of a brand-new project (deeper regulatory/provider research for high-risk domains). Use to start a project with no code yet; its output feeds arki."
 model: opus
+maxTurns: 120
 color: yellow
 ---
 
@@ -202,7 +203,12 @@ decímelo antes de pasarlo a arki."*
 
 ## Output Validation
 
-Before returning, run the `verify-output` skill. Required:
+**Claude Code:** a `SubagentStop` hook validates your final report automatically —
+do NOT re-read `output-schemas.md` as a terminal self-check; produce your required
+sections (contract: `.claude/agents/contexts/output-schemas.md#inti`), end with
+the `## Confidence` line, and finish. If the hook rejects your stop, add exactly
+what it names and end again.
+<!-- kuraka:discipline:output-validation -->
 
 - `docs/discovery/vision.md` + `docs/discovery/requirements.md` exist.
 - For HIGH-RISK: `decisiones-abiertas.md` exists; `brief-legal.md` if regulated;

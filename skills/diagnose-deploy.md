@@ -136,6 +136,41 @@ ASP.NET MVC 5 / OWIN OpenID Connect).
 - **Validación rápida:** ¿se resetea el handshake justo al pedir el documento de metadata?
 - **Fix:** `ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;` en el arranque.
 
+### DD-09 — 502 en un prefijo que el proxy del front reenvía a un upstream centinela inexistente en la nube
+- **Stack:** contenedores detrás de un balanceador con reglas por ruta (ALB/ingress) + un
+  frontend nginx que además hace `proxy_pass` de algunos prefijos al backend.
+- **Síntoma:** un prefijo concreto (p.ej. `/media/*`) da **502 en TODAS sus peticiones**,
+  mientras el resto de la app —incluida la API que lista esos mismos recursos— responde 200.
+  Imposible de reproducir en local: en local funciona siempre.
+- **Señal:** en el log del **frontend** (no del backend):
+  `connect() failed (111: Connection refused) while connecting to upstream, request: "GET /media/x.webp", upstream: "http://127.0.0.1:8000/media/x.webp"`.
+  Y en el log del **backend**, **ausencia total** del request. El `Content-Type` de la
+  respuesta es `text/html` (página de error), no el tipo del recurso.
+- **Causa raíz:** el balanceador solo tiene regla para **algunos** prefijos del backend
+  (típicamente `/api/*`); el resto cae en la **acción por defecto → frontend**. El nginx del
+  frontend sí tiene un `location` que proxya ese prefijo, pero su `BACKEND_URL` está fijado a
+  un **valor centinela** (`http://127.0.0.1:8000`) puesto solo «para que nginx arranque»,
+  bajo la premisa —cierta en su día— de que en la nube ese proxy no se usaría. Al añadir
+  después prefijos nuevos al nginx **sin** añadir sus reglas al balanceador, el centinela
+  pasa de inofensivo a agujero. En `awsvpc`/Fargate cada task tiene su propio `localhost`, así
+  que `127.0.0.1:8000` **nunca** puede alcanzar al backend.
+- **Validación rápida (1 paso):** comparar el prefijo que **vive** con el que **muere**. Si
+  la única diferencia es el prefijo de ruta, es enrutado. Confirmar con
+  `aws elbv2 describe-rules --listener-arn <arn>`: si no hay `path_pattern` para el prefijo
+  que falla, está diagnosticado. La línea `connect() failed ... upstream` del log del front lo
+  cierra.
+- **Fix:** añadir la `aws_lb_listener_rule` (o el `Ingress path`) que falta apuntando al target
+  group del backend. **NO** apuntar el nginx al backend: en Fargate exige abrir el SG y añade
+  un salto por recurso. **Vive en:** infraestructura — no requiere recompilar ni redeployar
+  ninguna imagen.
+- **Semáforo:** `curl -I` al recurso devuelve 200 con su `Content-Type` real; en el log del
+  front dejan de aparecer `connect() failed`; en el del backend empiezan a aparecer los 200.
+- **Prevención:** cada `location ... proxy_pass` del template de nginx debe tener una
+  `path_pattern` equivalente en el IaC. Es un acoplamiento invisible entre dos ficheros de
+  repos/capas distintas — candidato a check automático en el verificador de despliegue.
+- **Incidente de referencia:** `docs/process/incidentes/INCIDENTE-20260820-media-502-staging.md`
+  (GuaiHome staging, 2026-08-20 — el baúl de imágenes del admin, 59 `.webp` en 502).
+
 ---
 
 ## Cómo crecer este catálogo

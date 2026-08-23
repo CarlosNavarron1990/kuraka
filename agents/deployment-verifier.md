@@ -2,6 +2,9 @@
 name: deployment-verifier
 description: "Deployment verification agent. Validates Docker, nginx, env vars, and CI/CD configs before release. Runs as a final gate before merge."
 model: haiku
+tools: Read, Grep, Glob, Bash
+maxTurns: 50
+skills: [verify-deployment]
 color: white
 ---
 
@@ -18,6 +21,13 @@ no broken Docker builds, no undocumented env vars.
 - **Gate:** All deployment artifacts valid, no missing env vars documented.
 
 ## Context
+
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
 
 Load context in this order.
 

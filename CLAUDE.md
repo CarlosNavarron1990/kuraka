@@ -10,7 +10,9 @@ source-of-truth for a portable multi-agent system that mounts into any other pro
 two inspection/telemetry scripts, and a pytest-based structural eval harness.
 
 "Kuraka" (Quechua *kuraq* = "el mayor") is the orchestrator skill (`skills/kuraka.md`)
-that coordinates 16 subagents across an 8-phase dev lifecycle.
+that coordinates 23 subagents across an 8-phase dev lifecycle: 13 pipeline agents,
+3 entry agents (`inti`/`arki`/`amauta`), and 7 on-demand agents outside the phase
+map (see `skills/kuraka.md` §On-demand agents).
 
 ## Commands
 
@@ -110,7 +112,7 @@ running the current definition and seeing where it creaks. First run (2026-08):
 |---------------------------|-----------------------------------|-------------------------------------------|
 | `agents/*.md`             | `.claude/agents/`                 | Subagent definitions (16)                 |
 | `agents/contexts/*.md`    | `.claude/agents/contexts/`        | Per-agent rule bundles and output schemas |
-| `skills/*.md`             | `.claude/skills/`                 | Skill prompts (phase-level)               |
+| `skills/*.md`             | `.claude/skills/<n>/SKILL.md` + flat `.claude/skills/<n>.md` (transition) | Skill prompts (phase-level). Claude Code only registers the DIR form; the flat copy keeps old path references working (retire one suite version after references migrate). Both byte-identical to the vault; `kuraka_common._skill_dir_canonical` maps SKILL.md to the flat baseline for overrides, and restores mirror SKILL.md → flat. Invocability lives in vault frontmatter (`disable-model-invocation`/`user-invocable`/`context: fork`, stripped for non-Claude): phase skills + kuraka core non-invocable (the `/kuraka` COMMAND is the entry point), utilities fork, only facilitate-discovery / diagnose-deploy / seed-project-conventions stay user-invocable. **Collision rule**: a registered skill SHADOWS the same-named slash command, so a skill whose name matches a `commands/*.md` (today only `kuraka`) is mounted ONLY as the flat copy and any stale `<n>/SKILL.md` is deleted — otherwise `/kuraka` resolved to the non-invocable skill ("this skill can only be invoked by Claude") instead of the command entrypoint. |
 | `commands/*.md`           | `.claude/commands/` · `.cursor/commands/` · `.agent/workflows/` · `.codex/prompts/` | Slash-command prompts. Claude: copied verbatim. Non-Claude: rendered by `kuraka-export.py::export_commands` (arg-placeholder + role preamble adapted per tool). `EXPORT_SKIP` = clean-cases/lint/run-tests (sie_v2) + sync-from-vault (Claude-only). |
 | `rules/16-*.md`, `17-*.md`, `18-*.md`, `19-*.md` | `.claude/rules/`           | Framework meta-rules (only these)         |
 | `kuraka-artifacts/docs/process/**`    | `docs/process/**`           | lessons-learned + telemetry dashboard template |
@@ -210,6 +212,30 @@ Two things worth knowing (verified against code.claude.com/docs model-config):
    map are recommendations, surfaced as a "Model tier" column + legend in the exported
    `AGENTS.md` role table (`kuraka-export.py`), telling the user which roles need their
    strongest model.
+
+**Harness capabilities are centralized in `AGENT-HARNESS.yaml` — do NOT hand-edit
+`tools:` / `disallowedTools:` / `maxTurns:` (/ future `skills:` / `memory:`) lines.**
+Sibling of MODEL-ROUTING, same governance: change the map, then run
+`python3 kuraka-apply-harness.py` (`--check` flags drift; `validate-kuraka.sh` runs
+both `--check`s as vault self-checks). These keys are **Claude Code only**: the vault
+frontmatter is the Claude-native superset, and non-Claude renders (Antigravity /
+Cursor / Codex) subtract them at mount time via
+`kuraka_common.strip_claude_frontmatter` (`CLAUDE_ONLY_FRONTMATTER_KEYS`). Claude
+mounts stay byte-identical to the vault — required by the override subsystem's byte
+comparison, so NEVER inject frontmatter at mount time for the claude target.
+Vault-side regression tests for this contract live in `tests-vault/`
+(`python3 -m pytest tests-vault/ -v`; not mounted into consumers).
+
+**Hooks (`hooks/`, Claude-only) + discipline blocks (`discipline/`).** Four
+deterministic enforcement hooks (telemetry completeness, gate integrity T7,
+orchestrator write guard, output validation — see `hooks/README.md`) are mounted
+into `.claude/hooks/` and wired into the consumer's `.claude/settings.json` by a
+non-destructive merge (`merge_claude_hook_settings`), for the claude target ONLY.
+Where a hook replaces manual discipline prose, the vault text keeps a slim
+hook-note plus a `<!-- kuraka:discipline:<name> -->` marker; non-Claude renders
+re-expand the marker to the full manual prose from `discipline/<name>.md`
+(`_expand_discipline` in `kuraka-mount.py`) — no platform loses a rule when
+Claude's prompts slim down.
 
 ### The orchestrator workflow
 

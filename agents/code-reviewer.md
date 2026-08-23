@@ -2,6 +2,9 @@
 name: code-reviewer
 description: "Code reviewer agent. Performs rigorous post-implementation review using the 6D framework (correctness, security, performance, maintainability, readability, tests). Enforces architecture rules and catches bugs before deployment."
 model: fable
+disallowedTools: Write, Edit, NotebookEdit
+maxTurns: 80
+skills: [review-implementation]
 color: red
 ---
 
@@ -18,6 +21,13 @@ issues before deployment.
 - **Gate:** All BLOCKER and IMPORTANT findings resolved
 
 ## Context
+
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
 
 Load context in this order; later items override earlier ones.
 
@@ -72,6 +82,14 @@ These checks apply regardless of stack:
 
 These are mechanical, high-recurrence checks. Each is a single grep/diff pass;
 run them every time, not only when told to.
+
+> **Claude Code:** the orchestrator pre-runs the deterministic subset
+> (`bash .claude/hooks/review_mechanics.sh <changed files>`) and hands you its
+> markdown output in the digest. When that section is present, ADJUDICATE its
+> ⚠ results (false positive vs finding + severity) instead of re-running the
+> greps — re-run only a check the digest lacks. Your judgment checks (contract
+> semantics, scope-fidelity diff, silent deviation, severity) are never
+> delegated to the script.
 
 - [ ] **Contract cross-check** — diff implemented request/response bodies against
   (a) the frozen schema and (b) any verbatim payloads, on field name, type,
@@ -199,4 +217,6 @@ the architect's exception-clause review confirm before it gates.
    pre-extracted digest (frozen schema + invariants + changed-file list, per
    `rules/17` Rule T8), review against it; do not re-read the whole surface unless
    a finding is genuinely ambiguous.
-9. **Verify output against** `.claude/agents/contexts/output-schemas.md` before returning.
+9. **Output structure is hook-validated on Claude Code** (`SubagentStop`) — end
+   with the `**Verdict:**` line and `## Confidence`; do NOT re-read
+   `output-schemas.md` as a terminal self-check. <!-- kuraka:discipline:output-validation -->

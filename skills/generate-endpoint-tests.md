@@ -3,6 +3,8 @@ name: generate-endpoint-tests
 description: "Generate endpoint / route tests using the framework's HTTP test client. Tests HTTP status codes, response shapes, auth requirements, and error formats."
 agent: "`test-engineer`"
 phase: "6 — see `kuraka`"
+disable-model-invocation: true
+user-invocable: false
 ---
 
 # Generate Endpoint Tests

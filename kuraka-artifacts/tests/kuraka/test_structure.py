@@ -103,6 +103,68 @@ def test_should_have_output_schema_for_every_phase_producing_output(output_schem
 
 
 # ---------------------------------------------------------------------------
+# Claude-native registration (skills as SKILL.md dirs + harness capabilities)
+# ---------------------------------------------------------------------------
+
+
+def _command_stems(claude_dir: Path) -> set[str]:
+    cmds = claude_dir / "commands"
+    return {p.stem for p in cmds.glob("*.md")} if cmds.is_dir() else set()
+
+
+def test_should_register_every_skill_as_skill_md_dir(skills_dir: Path,
+                                                     claude_dir: Path) -> None:
+    """Claude Code only registers skills/<n>/SKILL.md dirs; the flat .md files
+    are a transition compat copy. Every flat skill must have its dir form —
+    EXCEPT a skill whose name collides with a slash command (a registered skill
+    shadows the command), which is mounted flat-only by design."""
+    colliding = _command_stems(claude_dir)
+    missing = [p.stem for p in skills_dir.glob("*.md")
+               if p.stem not in colliding
+               and not (skills_dir / p.stem / "SKILL.md").exists()]
+    assert not missing, f"skills without SKILL.md dir form: {missing}"
+
+
+def test_should_not_register_a_skill_that_shadows_a_command(skills_dir: Path,
+                                                            claude_dir: Path) -> None:
+    """The inverse guard: a skill sharing a command's name must NOT be mounted
+    as a registered dir — that shadowing broke `/kuraka` ("this skill can only
+    be invoked by Claude") until the mount started skipping it."""
+    for stem in _command_stems(claude_dir):
+        if (skills_dir / f"{stem}.md").exists():
+            assert not (skills_dir / stem / "SKILL.md").exists(), (
+                f"skills/{stem}/SKILL.md shadows the /{stem} command — "
+                f"the mount must ship only the flat copy for colliding names")
+
+
+def test_should_not_collide_kuraka_core_with_slash_commands(skills_dir: Path,
+                                                            claude_dir: Path) -> None:
+    """The /kuraka entry point is the COMMAND; the core skills must not also
+    register slash commands or auto-invoke. (`kuraka` itself is flat-only — see
+    the shadowing guard above — so only its companions are checked here.)"""
+    colliding = _command_stems(claude_dir)
+    for name in ("kuraka", "kuraka-modes", "kuraka-policies"):
+        if name in colliding:
+            continue
+        p = skills_dir / name / "SKILL.md"
+        if not p.exists():
+            pytest.skip("pre-Wave-3 mount")
+        fm = parse_frontmatter(p.read_text(encoding="utf-8"))
+        assert str(fm.get("user-invocable")).lower() == "false", name
+        assert str(fm.get("disable-model-invocation")).lower() == "true", name
+
+
+def test_should_deny_write_tools_to_pure_reviewers(agents_dir: Path) -> None:
+    """Role isolation by harness: pure reviewer agents carry the Write/Edit
+    denial in frontmatter (governed by the vault's AGENT-HARNESS.yaml)."""
+    for name in ("code-reviewer", "security-reviewer", "migration-reviewer"):
+        fm = parse_frontmatter((agents_dir / f"{name}.md").read_text(encoding="utf-8"))
+        denied = fm.get("disallowedTools", "")
+        assert "Write" in denied and "Edit" in denied, (
+            f"{name}: expected Write/Edit in disallowedTools, got '{denied}'")
+
+
+# ---------------------------------------------------------------------------
 # No orphan references
 # ---------------------------------------------------------------------------
 

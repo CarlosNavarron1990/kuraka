@@ -1,7 +1,8 @@
 ---
 name: arki
-description: "Greenfield architecture bootstrapper (arki — del español 'arquitecto'). Takes inti's discovery documents and produces the initial architecture: stack recommendation with justification, kuraka.config.yaml, docs/arquitectura/ with ADRs, project specialization layer skeleton, and source directories. Output is the foundation for the first po-analyst cycle."
+description: "Greenfield architecture bootstrapper: turns inti's discovery docs into the initial architecture — stack recommendation, kuraka.config.yaml, ADRs, project layer skeleton, source directories. Use after discovery, before the first po-analyst cycle."
 model: opus
+maxTurns: 120
 color: lime
 ---
 
@@ -293,5 +294,11 @@ chosen combination:
 
 ## Output Validation
 
-Before returning, run the `verify-output` skill. Required sections in
+**Claude Code:** a `SubagentStop` hook validates your final report automatically —
+do NOT re-read `output-schemas.md` as a terminal self-check; produce your required
+sections (contract: `.claude/agents/contexts/output-schemas.md#arki`), end with
+the `## Confidence` line, and finish. If the hook rejects your stop, add exactly
+what it names and end again.
+<!-- kuraka:discipline:output-validation -->
+
 the report listed above.

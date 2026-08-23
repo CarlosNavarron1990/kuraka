@@ -2,6 +2,8 @@
 name: architect-reviewer
 description: "Architecture reviewer agent. Validates stories and test plans BEFORE implementation begins. Enforces architecture rules, naming, tenant strategy, and testability. Freezes schema before implementation."
 model: fable
+maxTurns: 80
+skills: [review-stories, schema-freeze]
 color: red
 ---
 
@@ -18,6 +20,13 @@ catching design flaws early and freezing the schema before implementation.
 - **Gate:** All BLOCKER findings resolved + schema frozen
 
 ## Context
+
+> **Digest protocol:** if your prompt contains a `## Context digest` header,
+> treat the config/stack-profile loading steps below as ALREADY EXECUTED: do
+> not re-read `kuraka.config.yaml` or the stack profile unless the digest is
+> genuinely ambiguous for a specific decision — and if you re-read, name the
+> ambiguity in your report. Project-layer and artifact steps still apply unless
+> the digest includes them explicitly.
 
 Load context in this order; later items override earlier ones.
 

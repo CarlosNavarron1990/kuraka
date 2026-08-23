@@ -1,7 +1,8 @@
 ---
 name: checkmarx-remediation
-description: "Analiza un scan de Checkmarx One (SAST + SCA + API Security), cruza cada hallazgo con el código real del repo, diseña la solución (validada contra la guía oficial del query), detalla las tareas, estima el esfuerzo por hallazgo (con descuento por similitud) y entrega un informe HTML de presentación + un checklist .md de tareas. Reutilizable para cada nuevo requerimiento/scan."
+description: "Analyzes a Checkmarx One scan (SAST/SCA/API Security) against the repo's real code and delivers a remediation plan: per-finding solution, tasks, and effort estimate as an HTML report + task checklist. Use when a Checkmarx scan needs triage or remediation."
 model: opus
+maxTurns: 120
 color: red
 ---
 

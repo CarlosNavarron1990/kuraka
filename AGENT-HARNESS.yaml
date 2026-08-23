@@ -1,0 +1,159 @@
+# =============================================================================
+# AGENT-HARNESS.yaml — single source of truth for the Claude Code HARNESS
+# capabilities of each Kuraka agent (tools / disallowedTools / maxTurns /
+# skills preload / memory scope).
+#
+# Sibling of MODEL-ROUTING.yaml, same governance pattern:
+#   - NEVER hand-edit these keys in agents/*.md frontmatter.
+#   - Change this map, then run:  python3 kuraka-apply-harness.py
+#     (or --check to validate + report drift without writing; exit 1 on drift).
+#
+# PLATFORM SCOPE — Claude Code ONLY.
+#   These keys are written into the vault frontmatter (the Claude-native
+#   superset). Non-Claude renders (Antigravity / Cursor / Codex) subtract them
+#   at mount/export time via kuraka_common.CLAUDE_ONLY_FRONTMATTER_KEYS —
+#   they never reach a platform that doesn't understand them. Claude mounts
+#   copy the vault verbatim (required by the byte-compare override subsystem).
+#
+# WHY maxTurns IS ~2x THE POLICY CAP
+#   kuraka-policies.md defines SOFT tool-use caps (30/50/40/25) that the
+#   orchestrator measures and escalates on (>1x warn, >2x checkpoint note).
+#   maxTurns is a HARD harness kill — so it sits at the ~2x escalation
+#   ceiling as a runaway backstop, not at the soft cap (story-refiner once ran
+#   3.7x the soft cap and produced a REAL finding; a hard 1x cap would have
+#   truncated legitimate work).
+#
+# EMIT TOGGLES
+#   skills:  stays false until Wave 3 (flat .md skills are not registered by
+#            Claude Code; preloading unregistered skills would error).
+#   memory:  stays false until Wave 4 (agent-memory rollout).
+#   Disabling a toggle REMOVES that key from all agent frontmatter on the next
+#   apply (the applier owns every managed key).
+#
+# schema_version: 1
+# =============================================================================
+
+schema_version: 1
+
+emit:
+  tools: true
+  disallowedTools: true
+  maxTurns: true
+  skills: true    # Wave 3: skills are registered as SKILL.md dirs -> preload works
+  memory: true    # Wave 4: cross-cycle agent memory (final-auditor, pattern-detector)
+
+# -----------------------------------------------------------------------------
+# profiles — reusable capability bundles. Agent-level keys override profile
+# keys. An agent with no profile and no keys gets nothing emitted.
+#
+#   reviewer     pure reporters: they read, grep, diff and RETURN a report.
+#                Write/Edit denied — role isolation by harness, not prose.
+#                (architect-reviewer is NOT here: it writes the freeze doc.)
+#   gate-author  judgment gates that legitimately write docs (freeze, REQ,
+#                stories, RETRO). No tool denial; Wave-2 hooks guard code paths.
+#   implementer  writes source and tests; widest turn budget.
+#   mechanical   deterministic validators with a read-only allowlist.
+#   explorer     entry/on-demand agents that sweep large surfaces and write
+#                reports/config; generous backstop.
+# -----------------------------------------------------------------------------
+profiles:
+  reviewer:
+    disallowedTools: "Write, Edit, NotebookEdit"
+    maxTurns: 80
+  gate-author:
+    maxTurns: 60
+  implementer:
+    maxTurns: 100
+  mechanical:
+    tools: "Read, Grep, Glob, Bash"
+    maxTurns: 50
+  explorer:
+    maxTurns: 120
+
+# -----------------------------------------------------------------------------
+# agents — every agents/*.md stem MUST appear exactly once (the applier errors
+# on any mismatch, so adding/removing an agent forces a harness decision).
+# `skills` values are declared now but only emitted when emit.skills is true.
+# -----------------------------------------------------------------------------
+agents:
+  # -- pipeline: analysis / authoring gates
+  po-analyst:
+    profile: gate-author
+    skills: "requirement-consistency-check, analyze-requirement"
+  story-refiner:
+    profile: gate-author
+    skills: "refine-stories"
+  architect-reviewer:            # writes SCHEMA-FROZEN docs -> no Write denial
+    profile: gate-author
+    maxTurns: 80
+    skills: "review-stories, schema-freeze"
+  final-auditor:                 # writes RETRO + applies approved patches
+    profile: gate-author
+    maxTurns: 50
+    skills: "run-audit"
+    memory: project
+  pattern-detector:              # writes RECURRING-ISSUES.md
+    profile: gate-author
+    maxTurns: 50
+    skills: "detect-patterns"
+    memory: project
+
+  # -- pipeline: pure reviewers (report only; the fix is routed back to Phase 4)
+  code-reviewer:
+    profile: reviewer
+    skills: "review-implementation"
+  security-reviewer:
+    profile: reviewer
+    skills: "security-audit"
+  migration-reviewer:
+    profile: reviewer
+    maxTurns: 50
+  migration-deployability:       # proves upgrade applies; report only
+    profile: reviewer
+
+  # -- pipeline: implementers
+  backend-developer:
+    profile: implementer
+    skills: "implement-story, write-tests"
+  frontend-developer:
+    profile: implementer
+    skills: "implement-story"
+  test-engineer:
+    profile: implementer
+    skills: "plan-tests, analyze-testability, generate-unit-tests, generate-endpoint-tests, validate-coverage"
+  e2e-tester:
+    profile: implementer
+    maxTurns: 80
+    skills: "generate-e2e-tests"
+
+  # -- pipeline: mechanical validators
+  deployment-verifier:
+    profile: mechanical
+    skills: "verify-deployment"
+
+  # -- entry agents (once per project)
+  inti:
+    profile: explorer
+  arki:
+    profile: explorer
+  amauta:
+    profile: explorer
+    skills: "seed-project-conventions"
+
+  # -- on-demand (outside the phase map)
+  pentest-auditor:               # writes HTML/MD reports -> no Write denial
+    profile: explorer
+  checkmarx-remediation:
+    profile: explorer
+  deploy-diagnostician:
+    profile: explorer
+    maxTurns: 80
+    skills: "diagnose-deploy"
+  provider-contract-validator:   # needs Postman MCP tools -> no allowlist
+    profile: explorer
+    maxTurns: 80
+  sentry-resolver:               # read-mostly by prose; may patch WITH explicit
+    profile: explorer            # per-turn permission -> no hard denial
+    maxTurns: 80
+  jira-ticket-sync:              # writes local md docs + needs Jira MCP tools
+    maxTurns: 50

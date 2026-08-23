@@ -29,6 +29,19 @@ ERRORS=0
 WARNINGS=0
 VALID_MODELS="fable opus sonnet haiku"
 
+# --- vault self-checks (single-source frontmatter maps) ----------------------
+# This script lives in the vault, so the two generated-frontmatter maps are
+# always reachable: verify they are drift-free before validating the mount.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for chk in kuraka-apply-models.py kuraka-apply-harness.py; do
+    if [ -f "$SCRIPT_DIR/$chk" ]; then
+        if ! python3 "$SCRIPT_DIR/$chk" --check >/dev/null 2>&1; then
+            echo "❌ vault self-check failed: $chk --check (run it directly for details)"
+            ERRORS=$((ERRORS+1))
+        fi
+    fi
+done
+
 echo "🪢 validate-kuraka — $TARGET"
 echo ""
 
