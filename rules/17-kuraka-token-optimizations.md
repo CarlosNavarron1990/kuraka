@@ -464,3 +464,25 @@ code-reviewer corrió 25–58 min en 4/8 ciclos releyendo archivos uno por uno
 
 **Estimación de ahorro**: 40–80K tokens por fix-run; latencia del reviewer de
 25–58 min a in-band.
+
+---
+
+## Rule T11 — Los micro-deltas se agrupan: el suelo del subagente es ~60K
+
+Un delta de 2 lineas costo 59.634 tokens y 2 tool uses (REQ-20260822,
+revert CRIT-2): el arranque de cualquier subagente en este proyecto
+(definicion + CLAUDE.md + reglas) cuesta ~55-60K antes del primer tool use.
+Una micro-tarea NO amortiza un subagente. Acumula los micro-deltas
+pendientes y despachalos en UN solo run con la lista completa; reserva el
+run individual para cuando el delta no puede esperar al siguiente batch.
+
+## Rule T12 — Presupuesto de mutacion y de infraestructura de test
+
+La verificacion por mutacion duplica el trabajo por test (romper, correr,
+confirmar, restaurar) y una story que monta infraestructura de test paga
+ficheros extra. Evidencia: los 5 desvios de tool_uses de REQ-20260825
+(1.02x-1.84x) y el 1.26x/1.50x del test-engineer de REQ-20260822 fueron
+TODOS friccion legitima de esta clase. Al lanzar esas fases, declara el cap
+de tool_uses multiplicado x1.5 EN EL PROMPT. No se recorta la practica
+(es la que convirtio "este test puede fallar" en hecho): se presupuesta,
+para que un WARN vuelva a significar anomalia y no rutina.

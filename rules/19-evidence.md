@@ -2,7 +2,7 @@
 description: "Evidence rules for every Kuraka agent and the orchestrator: behavior claims cite the executable body; non-existence claims carry a positive control; frozen-artifact edits fix the body first, the summary last."
 ---
 
-# Rule 19 — Evidence (R-CUERPO · R-CONTROL · R-ESPEJO)
+# Rule 19 — Evidence (R-CUERPO · R-CONTROL · R-DERIVA · R-ESPEJO)
 
 Cross-cutting rules for ANY claim an agent or the orchestrator makes about code
 or artifacts. Motivated by one cycle (facturacion-honorarios USREMAIL) with six
@@ -18,6 +18,11 @@ A claim about what code DOES must cite the **executable body** with
 
 - A function/variable **name**, a **comment**, a docstring, a decision table, a
   design doc, or **another agent's report** is NEVER evidence of behavior.
+- **Reenvio = afirmacion.** Re-asserting another artifact's claim (a REQ note,
+  a freeze line, an agent's report) inside a prompt, gate, or freeze makes it
+  YOUR claim: open the body first, or forward it marked
+  `[SIN VERIFICAR - origen: <artefacto>]`. A receiving agent treats an unmarked
+  forwarded claim as the forwarder's own assertion.
 - A commented-out or dead body means the behavior does NOT exist — a comment
   describing it is evidence of nothing.
 - If you did not open the body this run, the claim is a hypothesis and must be
@@ -32,6 +37,41 @@ Every "X does not exist / is never called / has no validator" claim requires:
 2. A **positive control** pasted next to the `0 matches`: the same grep pattern
    run against a place where it MUST match (proving the pattern can hit). A
    `0 matches` without a positive control proves only that the grep can fail.
+
+The same discipline covers every ad-hoc instrument, not only greps:
+
+3. **Exit-code provenance** — a nonzero exit is a verdict only with its
+   stderr head pasted. `ERR_MODULE_NOT_FOUND`, `ENOENT`, exit 127 /
+   "command not found" mean INSTRUMENT-BROKEN — never RED (and never GREEN).
+4. **Authored instruments are calibrated** — a verification command written
+   to be run later (a frozen grep AC, a gate command) is executed twice at
+   authoring: against a planted violation (must HIT) and against the tree it
+   will gate (must show the clean state) — and re-calibrated whenever that
+   tree diverges from the authoring tree.
+
+## R-DERIVA — a derived artifact proves it conserved its source
+
+When an artifact is DERIVED from a source that enumerates requirements (a
+ROADMAP section, a spec, a prototype, a REQ feeding stories), the derivation
+ships a **coverage table**: one row per enumerable item of the source, each
+with a disposition — `INCLUIDO (line in the derived artifact)` /
+`EXCLUIDO (explicit user decision, cited)` / `DIFERIDO (follow-up id)`.
+
+- Dispositions also admit `MECANISMO (mechanism shipped + fixture-tested;
+  zero live instances today — names the future instance source and instructs
+  downstream instruments not to expect live ones)`.
+- **Count check (0 tokens):** rows in the table == enumerated items in the
+  cited source section. The orchestrator verifies this mechanically before the
+  derived artifact feeds any phase.
+- **Coverage audit — a row can lie.** The count check proves no row is
+  missing; it cannot detect a false disposition. An `INCLUIDO` whose truth
+  depends on the source data having live instances is a behavior claim
+  (R-CUERPO applies per row): cite one live instance or reclassify as
+  `MECANISMO`. (S9C: two `INCLUIDO` rows for edge labels, zero labeled edges
+  — the count check passed both; only the audit caught them.)
+- A gate that validates a derived artifact **only against the derivation**
+  inherits its losses — at least one check per cycle opens the SOURCE.
+- No table, no derivation: the artifact cannot enter Phase 1.
 
 ## R-ESPEJO — body first, summary last
 
