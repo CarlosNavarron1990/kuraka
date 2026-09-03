@@ -144,7 +144,17 @@ def _excluded(rel: Path, exclude: tuple[str, ...]) -> bool:
 
 
 def sync_tree(src: Path, dst: Path, exclude: tuple[str, ...] = (), target_env: str = "claude") -> None:
-    """Mirror src→dst with `rsync --update` semantics."""
+    """Mirror src→dst. The vault is the source of truth; `copy_file` skips the
+    write when the content already matches, so the mirror is idempotent.
+
+    It deliberately does NOT keep the old `rsync --update` mtime guard
+    ("skip if the destination is newer"). `restore_overrides` re-applies stored
+    overrides with a fresh mtime, so any file that was ever an override became
+    permanently NEWER than the vault and the mount silently stopped refreshing
+    it — pinned to an old framework version even after the override was gone
+    (2026-09: 13 projects frozen on a stale `run-audit`, each mount reporting
+    success). Local tuning is preserved by the override subsystem, which is the
+    mechanism designed for it — never by refusing to copy."""
     if not src.is_dir():
         return
     for root, _dirs, files in os.walk(src):
@@ -153,54 +163,61 @@ def sync_tree(src: Path, dst: Path, exclude: tuple[str, ...] = (), target_env: s
             rel = sp.relative_to(src)
             if _excluded(rel, exclude):
                 continue
-            dp = dst / rel
-            if dp.exists() and dp.stat().st_mtime >= sp.stat().st_mtime:
-                continue
-            copy_file(sp, dp, target_env=target_env)
+            copy_file(sp, dst / rel, target_env=target_env)
 
 
 def _expand_discipline(text: str) -> str:
-    """Expand `<!-- kuraka:discipline:<name> -->` markers with the full manual
-    discipline prose from <vault>/discipline/<name>.md. Claude renders keep the
-    slim hook-note + marker (the harness enforces the rule there); non-Claude
-    renders get the complete manual discipline back, so no platform loses the
-    rule when Claude's prompts slim down."""
-    import re as _re
+    """Back-compat alias — the canonical implementation lives in kuraka_common
+    so that write_mount_manifest() can reproduce a mount byte-for-byte."""
+    from kuraka_common import expand_discipline
+    return expand_discipline(text, VAULT)
 
-    def _sub(m: "_re.Match[str]") -> str:
-        block = VAULT / "discipline" / f"{m.group(1)}.md"
-        if block.is_file():
-            return block.read_text(encoding="utf-8", errors="ignore").rstrip("\n")
-        return m.group(0)
 
-    return _re.sub(r"<!-- kuraka:discipline:([A-Za-z0-9_-]+) -->", _sub, text)
+def _shadowed(src_skills: Path, d: Path) -> tuple:
+    """`("SKILL.md",)` when the flat vault skill of the same name exists and
+    therefore owns that file; empty otherwise."""
+    return ("SKILL.md",) if (src_skills / f"{d.name}.md").is_file() else ()
+
+
+def _rendered_bytes(src: Path, target_env: str) -> bytes:
+    """Exactly what copy_file would write for this source and platform."""
+    if target_env != "claude" and src.suffix == ".md":
+        from kuraka_common import render_for_platform
+        return render_for_platform(
+            src.read_text(encoding="utf-8", errors="ignore"),
+            target_env, VAULT).encode("utf-8")
+    return src.read_bytes()
 
 
 def copy_file(src: Path, dst: Path, target_env: str = "claude") -> None:
+    """Write what the mount owes this path, unless it is already exactly that.
+
+    Content-addressed rather than mtime-addressed: skipping identical files
+    keeps the mount idempotent (no gratuitous mtime churn) without ever letting
+    a newer-but-stale destination survive a refresh."""
     import shutil
     if not src.is_file():
+        return
+    if dst.is_file() and dst.read_bytes() == _rendered_bytes(src, target_env):
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
     if target_env != "claude" and src.suffix == ".md":
         # Non-Claude renders SUBTRACT from the Claude-native vault superset:
-        # first drop Claude-only harness frontmatter (tools/maxTurns/...),
-        # re-expand the manual discipline prose the Claude hooks replace, then
-        # apply the platform's path projection. The claude target below stays a
+        # drop Claude-only harness frontmatter (tools/maxTurns/...), re-expand
+        # the manual discipline prose the Claude hooks replace, then apply the
+        # platform's path projection. The claude target below stays a
         # byte-identical copy — required by detect_overrides().
-        from kuraka_common import strip_claude_frontmatter
-        text = src.read_text(encoding="utf-8", errors="ignore")
-        text = strip_claude_frontmatter(text)
-        text = _expand_discipline(text)
-        if target_env == "antigravity":
-            text = text.replace(".claude/skills/", ".agents/skills/")
-            text = text.replace(".claude/rules/", ".agents/rules/")
-            text = text.replace(".claude/agents/", ".agents/agents/")
-            text = text.replace(".claude/project/", ".agents/project/")
-            text = text.replace(".claude/stack-profiles/", ".agents/stack-profiles/")
-            text = text.replace(".claude/templates/", ".agents/templates/")
-        elif target_env == "codex":
-            text = adapt_codex_paths(text)
-        dst.write_text(text, encoding="utf-8")
+        # The transform itself lives in kuraka_common.render_for_platform: the
+        # mount manifest hashes the output of that SAME function, which is what
+        # keeps a non-Claude mount from reading as one giant override.
+        from kuraka_common import render_for_platform
+        text = render_for_platform(
+            src.read_text(encoding="utf-8", errors="ignore"), target_env, VAULT)
+        # newline="\n": the manifest baseline is hashed as UTF-8 LF, so the
+        # mount must not let Windows translate line endings on write.
+        # (open(...) rather than Path.write_text(newline=…) — 3.9 compat.)
+        with open(dst, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
     else:
         shutil.copy2(src, dst)
 
@@ -282,9 +299,17 @@ def sync_claude_skills(src_skills: Path, dst_skills: Path) -> int:
         copy_file(p, skill_dir / "SKILL.md", target_env="claude")
         copy_file(p, dst_skills / p.name, target_env="claude")
         count += 1
+    # A vault skill DIRECTORY may shadow the flat skill of the same name. The
+    # flat `skills/<n>.md` is the canonical source (it is what gets rendered into
+    # `<n>/SKILL.md` just above), so the directory contributes its extra files
+    # (rules/, references/) but never its own SKILL.md — otherwise a stale copy
+    # inside the vault silently overwrites the fresh render. Until the mtime
+    # guard was removed this was masked by luck: the just-written file happened
+    # to be newer, so the overwrite was skipped.
     for d in src_skills.iterdir():
         if d.is_dir():
-            sync_tree(d, dst_skills / d.name, target_env="claude")
+            sync_tree(d, dst_skills / d.name, exclude=_shadowed(src_skills, d),
+                      target_env="claude")
     return count
 
 
@@ -331,100 +356,37 @@ def sync_antigravity_skills(src_skills: Path, dst_skills: Path) -> int:
         copy_file(p, skill_dir / "SKILL.md", target_env="antigravity")
         copy_file(p, dst_skills / p.name, target_env="antigravity")
         count += 1
+    # A vault skill DIRECTORY may shadow the flat skill of the same name. The
+    # flat `skills/<n>.md` is the canonical source (it is what gets rendered into
+    # `<n>/SKILL.md` just above), so the directory contributes its extra files
+    # (rules/, references/) but never its own SKILL.md — otherwise a stale copy
+    # inside the vault silently overwrites the fresh render. Until the mtime
+    # guard was removed this was masked by luck: the just-written file happened
+    # to be newer, so the overwrite was skipped.
     for d in src_skills.iterdir():
         if d.is_dir():
-            sync_tree(d, dst_skills / d.name)
+            sync_tree(d, dst_skills / d.name, exclude=_shadowed(src_skills, d))
     return count
 
 
 def _codex_skill_text(name: str, description: str, body: str, source_kind: str) -> str:
-    """Render a Codex-native SKILL.md. Codex discovers project-local skills only
-    from .codex/skills/<name>/SKILL.md, so vault skills and Kuraka agents are
-    normalized into that shape for the Codex target."""
-    description = adapt_codex_paths(description)
-    body = adapt_codex_paths(body)
-    platform_override = ""
-    if name in {"kuraka", "kuraka-policies"}:
-        platform_override = """## Codex Platform Override
-
-This override takes precedence over Claude-specific wording below. When the
-workflow says to invoke an agent, delegate to the matching native custom agent
-in `.codex/agents/<name>.toml`, wait for its structured handoff, and apply the
-gate before the next phase. The orchestrator never adopts a specialist role.
-
-Codex may not expose Claude's `<usage>` block. Keep the telemetry file and
-record phase, agent, attempt, timestamps, status, and produced artifacts.
-Record unavailable token, tool-use, or duration values as `null` or `unknown`;
-never fabricate `0`. Missing optional usage metrics do not block a gate.
-
-"""
-    return (
-        "---\n"
-        f"name: {name}\n"
-        f'description: "{description}"\n'
-        "---\n\n"
-        f"> Kuraka Codex {source_kind}. Loaded from this project via `.codex/skills/{name}/SKILL.md`.\n\n"
-        f"{platform_override}"
-        f"{body.lstrip()}"
-    )
-
+    """Back-compat alias — canonical implementation in kuraka_common, so the
+    mount manifest baseline for .codex/skills/<n>/SKILL.md matches what this
+    writes (that projection is NOT a plain copy_file render)."""
+    from kuraka_common import codex_skill_text
+    return codex_skill_text(name, description, body, source_kind)
 
 def _frontmatter_and_body(path: Path) -> tuple[dict[str, str], str]:
-    text = path.read_text(encoding="utf-8", errors="ignore")
-    fm: dict[str, str] = {}
-    if text.startswith("---"):
-        end = text.find("\n---", 3)
-        if end != -1:
-            block = text[3:end]
-            body = text[end + 4:].lstrip("\n")
-            for raw in block.splitlines():
-                if ":" not in raw:
-                    continue
-                k, _, v = raw.partition(":")
-                fm[k.strip()] = v.strip().strip('"').strip("'")
-            return fm, body
-    return fm, text
-
+    from kuraka_common import split_frontmatter
+    return split_frontmatter(path.read_text(encoding="utf-8", errors="ignore"))
 
 def adapt_codex_paths(text: str) -> str:
     """Translate Claude paths and command mentions to the Codex projection.
 
-    Root Markdown skills become SKILL.md directories in Codex, so convert the
-    common explicit `.md` references before applying the broader replacements.
-    """
-    import re
-
-    text = re.sub(
-        r"\.claude/skills/([A-Za-z0-9_-]+)\.md",
-        r".codex/skills/\1/SKILL.md",
-        text,
-    )
-    text = (text.replace(".claude/skills/", ".codex/skills/")
-                .replace(".claude/rules/", ".codex/rules/")
-                .replace(".claude/agents/", ".codex/agents/")
-                .replace(".claude/project/", ".codex/project/")
-                .replace(".claude/stack-profiles/", ".codex/stack-profiles/")
-                .replace(".claude/templates/", ".codex/templates/")
-                .replace(".claude/", ".codex/")
-                .replace("Requires a Claude Code restart afterward.",
-                         "Requires a new Codex session afterward."))
-    text = text.replace(
-        'kuraka-backup.py" <project-root>',
-        'kuraka-backup.py" <project-root> --layer-root .codex/project --skip-overrides',
-    )
-    command_names = (
-        "checkmarx-remediation", "kuraka-wizard", "kuraka-backup",
-        "kuraka-update", "kuraka", "amauta", "inti", "arki",
-    )
-    for name in command_names:
-        text = text.replace(f"/prompts:{name}", f"${name}")
-        text = re.sub(
-            rf"(?<![A-Za-z0-9_.$/])/{re.escape(name)}(?![A-Za-z0-9_.-])",
-            f"${name}",
-            text,
-        )
-    return text
-
+    Back-compat alias — the canonical implementation lives in kuraka_common so
+    the mount and the mount-manifest baseline can never drift apart."""
+    from kuraka_common import adapt_codex_paths as _impl
+    return _impl(text)
 
 def sync_codex_skills(src_skills: Path, dst_skills: Path) -> int:
     """Sync only reusable Kuraka skills as Codex-native project skills.
@@ -444,11 +406,18 @@ def sync_codex_skills(src_skills: Path, dst_skills: Path) -> int:
             desc = fm.get("description") or f"Kuraka workflow skill: {name}"
             skill_dir = dst_skills / name
             skill_dir.mkdir(parents=True, exist_ok=True)
-            (skill_dir / "SKILL.md").write_text(_codex_skill_text(name, desc, body, "skill"), encoding="utf-8")
+            # newline="\n": keep the bytes identical to the manifest baseline
+            # (which hashes this same projection) on Windows too.
+            with open(skill_dir / "SKILL.md", "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(_codex_skill_text(name, desc, body, "skill"))
             count += 1
+        # same rule as the Claude mount: the flat skill owns SKILL.md (here it
+        # is rebuilt as a Codex-native projection), the directory only adds its
+        # extra files.
         for d in src_skills.iterdir():
             if d.is_dir():
-                sync_tree(d, dst_skills / d.name, target_env="codex")
+                sync_tree(d, dst_skills / d.name, exclude=_shadowed(src_skills, d),
+                          target_env="codex")
 
     return count
 
@@ -784,8 +753,13 @@ def main() -> int:
         return cat in selected
 
     # pre-flight: snapshot local overrides BEFORE the copy overwrites them.
+    # --target is REQUIRED here: without it the backup autodetects the platform
+    # and, in a project mounted for several platforms, snapshots the wrong one
+    # (a .claude mount of a project that also has .agents/ used to snapshot the
+    # Antigravity render and clobber the Claude override store).
     if target_env != "codex" and (platform_dir / "agents").is_dir():
-        if run_py("kuraka-backup.py", str(target), "--overrides-only", quiet=True) == 0:
+        if run_py("kuraka-backup.py", str(target), "--overrides-only",
+                  "--target", target_env, quiet=True) == 0:
             print("   ✓ overrides locales respaldados al store central (pre-mount)")
             print("")
 
@@ -1032,6 +1006,19 @@ def main() -> int:
         if seeded:
             print("")
 
+    # No config yet? Draft one AUTOMATICALLY (kuraka-init --config-only never
+    # overwrites). Until 2026-08 the mount only PRINTED how to create it, so any
+    # project adopted straight with mount-kuraka (the documented branch-switch
+    # flow) ran without a config: the agents lost the canonical docs/process
+    # mapping and scattered their output — guai-home-marketplace ended with its
+    # retros split across docs/process/retros/ AND agent-retrospectives/, 36 of
+    # them duplicated. The draft is a floor, not a substitute for `amauta`.
+    layer_root = f"{platform_dir.name}/project"
+    if not (target / "kuraka.config.yaml").exists() or not (target / layer_root).is_dir():
+        if run_py("kuraka-init.py", "--target", str(target), "--adopt",
+                  "--layer-root", layer_root, "--yes") == 0:
+            print("")
+
     # adoption check
     has_config = (target / "kuraka.config.yaml").exists()
     has_project = (platform_dir / "project").is_dir() or (target / ".claude" / "project").is_dir()
@@ -1098,6 +1085,14 @@ def main() -> int:
     print("  • (Recomendado) Componentes que potencian Kuraka:")
     print(f"     {VAULT}/RECOMMENDED-COMPONENTS.md")
     print("     → RTK (ahorro 70-90% de tokens), ui-ux-pro-max, Playwright MCP...")
+    print("")
+
+    # Health check: a mount that exits 0 proves nothing about the RESULT — every
+    # defect found auditing the store in 2026-08 was silent. Report only.
+    print("  • Estado del proyecto (kuraka-doctor):")
+    if run_py("kuraka-doctor.py", str(target)) not in (0, None):
+        print("     → arreglo automático de lo seguro: "
+              f'python3 "{VAULT / "kuraka-doctor.py"}" "{target}" --fix')
     print("")
     return 0
 

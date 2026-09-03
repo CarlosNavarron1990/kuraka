@@ -106,20 +106,11 @@ def main() -> int:
 
     slug = kc.project_slug(project, args.name)
 
-    platform = args.platform
-    if not platform:
-        if args.target == "antigravity" or (project / ".agents").is_dir():
-            platform = "agents"
-        elif args.target == "codex" or (project / ".codex").is_dir():
-            platform = "codex"
-        elif args.target == "cursor" or (project / ".cursor").is_dir():
-            platform = "cursor"
-        else:
-            platform = "claude"
+    platform = kc.detect_platform(project, args.target, args.platform)
 
     layer_root = args.layer_root
     if layer_root == ".claude/project":
-        p_dir = f".{platform}" if not platform.startswith(".") else platform
+        p_dir = kc.platform_dirname(platform)
         if (project / p_dir / "project").is_dir() or platform != "claude":
             layer_root = f"{p_dir}/project"
 
@@ -131,7 +122,7 @@ def main() -> int:
             return 0
         oc = kc.restore_overrides(vault, slug, project, platform=platform)
         if oc:
-            p_name = f".{platform}" if not platform.startswith(".") else platform
+            p_name = kc.platform_dirname(platform)
             print(f"   ✓ overrides re-aplicados: {oc} archivo(s) ({p_name}/{{agents,skills,commands}}, pisando la copia del vault)")
         return 0
 
@@ -169,7 +160,7 @@ def main() -> int:
     if not args.skip_overrides:
         oc = kc.restore_overrides(vault, slug, project, platform=platform)
         if oc:
-            p_name = f".{platform}" if not platform.startswith(".") else platform
+            p_name = kc.platform_dirname(platform)
             print(f"   overrides → {p_name}/{{agents,skills,commands}}   ({oc} re-aplicado(s), pisando la copia del vault)")
     print("")
     print(f"✅ restore de {slug} completo.")

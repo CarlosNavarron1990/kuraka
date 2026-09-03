@@ -106,6 +106,25 @@ Create at
 
 Also copy to `RETRO-LATEST.md` for easy access.
 
+**Contract of the RETRO FILE — the last line is mandatory:**
+
+```markdown
+## Confidence: HIGH | MEDIUM | LOW
+```
+
+It is not decoration and not the same thing as the confidence line of your
+*response*: `kuraka-backup.py` parses it out of the FILE (`find_verdict`) into
+`cycles/<REQ>/meta.yaml` and into the cross-project `projects/INDEX.md`, which is
+what `pattern-detector` reads to compare cycles across projects. A RETRO without
+it is archived but nearly invisible: it becomes a row with an empty verdict.
+
+State it explicitly here — do NOT rely on the platform reminding you. On Claude
+the `output_validate.py` hook (SubagentStop) enforces the line on your response,
+so it tends to end up in the file too; the platforms without hooks only have the
+manual prose, and in practice that produced whole projects of verdict-less
+retros (camisassis: 16 of 16 archived with `verdict: ""`, so none of its cycles
+count in any cross-project comparison).
+
 ### 8. Ask user and apply patches
 
 "Should I apply the proposed patches from section 6? Project-layer
@@ -129,6 +148,31 @@ Idempotent. Do NOT skip: it (1) lets Kuraka learn from failures across ALL
 projects and (2) preserves the work outside the solution's git so a branch switch
 can't lose it (`kuraka-restore.py` pastes it back on the next mount). Confirm
 the command exited 0.
+
+**It will exit 1 if the RETRO you just wrote has no `## Confidence:` line** — the
+state is snapshotted, but the cycle does not close until you add it and re-run
+(the `meta.yaml` then fills in by itself). This is enforced in the script rather
+than in a hook so that it holds on EVERY platform: only Claude has hooks, and on
+the others prose alone left whole projects of verdict-less cycles. A cycle with
+no telemetry is warned about, not blocked.
+
+### 10. Verify the state actually landed (exit 0 is not evidence)
+
+```bash
+python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-doctor.py" <project-root>
+```
+
+Re-reads the central store and confirms what step 9 was supposed to produce:
+this cycle's RETRO archived, its telemetry attached, the agent tuning applied in
+step 8 snapshotted as an override, `docs/process` mirrored, the mount manifest
+stamped with the current suite, and the config's `project.name` still agreeing
+with the slug the store uses. Record its verdict in the RETRO.
+
+Non-zero does NOT close the cycle: run it again with `--fix` (it applies the safe
+repairs and re-checks) and act on whatever remains — a missing mount manifest
+needs `kuraka-mount.py <project> --update`; a slug mismatch is a naming decision,
+never an automatic rewrite. Every silent breakage found in the 2026-08 store
+audit had passed a green `kuraka-backup` first.
 
 ### 10. Auto-trigger pattern-detector when due
 

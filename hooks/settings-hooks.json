@@ -30,6 +30,25 @@
             "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/telemetry_append.py\""
           }
         ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/retro_contract.py\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/session_doctor.py\""
+          }
+        ]
       }
     ],
     "SubagentStop": [

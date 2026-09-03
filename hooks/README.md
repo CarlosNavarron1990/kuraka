@@ -13,6 +13,8 @@ discipline prose via the `discipline/` block expansion (see CLAUDE.md).
 | `gate_integrity.py` | PreToolUse (Bash) | Rule T7: gate commands (`test_cmd`/`lint_cmd`/`typecheck_cmd`) never piped | exit 2 + fix; escape: `KURAKA_GATE_PIPE_OK` marker in the command (user-approved) |
 | `orchestrator_guard.py` | PreToolUse (Write/Edit) | Orchestrator never writes under code roots; subagents unaffected | exit 2; one-shot user-approved escape: `touch .claude/hooks/ALLOW-ORCH-WRITE` |
 | `output_validate.py` | SubagentStop | Universal output contract (Confidence line; Verdict for reviewers) | exit 2 once (loop-guarded); agent re-emits its report |
+| `retro_contract.py` | PostToolUse (Write) | The RETRO **file** carries `## Confidence: HIGH\|MEDIUM\|LOW` — what `find_verdict` parses into `meta.yaml` + `projects/INDEX.md` | exit 2 once per RETRO (loop-guarded); the agent appends the line |
+| `session_doctor.py` | SessionStart | Kuraka state health (`kuraka-doctor.py --brief`): config, layer, mount manifest, overrides↔store, retros archived, telemetry attached, state mirrored | never blocks — surfaces the findings as context; repair with `kuraka-doctor.py --fix` |
 
 All hooks are fail-open (unexpected input → exit 0) and inert outside a Kuraka
 project (they require `kuraka.config.yaml`). Wiring lives in

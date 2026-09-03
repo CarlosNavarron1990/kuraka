@@ -34,6 +34,24 @@ Also required: `kuraka.config.yaml` at the project root. If missing, ask
 the user to run `kuraka init` (or copy the template from the framework's
 `kuraka-artifacts/config-schema.yaml`).
 
+**Preflight — run BEFORE Phase 1** (once per cycle; ~2 s, no model cost):
+
+```bash
+python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-doctor.py" <project-root>
+```
+
+It verifies the RESULT, not exit codes: config present and its `project.name`
+agreeing with the slug the central store already uses, specialization layer,
+mount manifest stamped with the current suite, local agent tuning in sync with
+the store, every RETRO archived, telemetry attached, `docs/process` mirrored.
+Exit 0 = green, start the cycle. Non-zero: run it with `--fix` (it repairs the
+safe ones and re-checks) and act on what it still reports — a missing manifest
+needs `kuraka-mount.py <project> --update`, a slug mismatch is a naming decision.
+**Do not start a cycle on a project whose config is missing**: without
+`docs_process_root` the agents scatter REQs, retros and telemetry, and the cycle
+becomes unauditable (guai-home-marketplace ended with its retros split across two
+directories, 36 of them duplicated).
+
 If the user hasn't provided a requirement, ask before proceeding. If the
 user has only an **idea, not a requirement** (and wants to explore the
 bases of the system), do not start Phase 1 — run the Discovery mode first:
@@ -110,7 +128,7 @@ diff at the Phase 1 gate instead of absorbing it.
 | 6.5. E2E | `e2e-tester` | `generate-e2e-tests` | Playwright passes |
 | 6.7. Deployment | `deployment-verifier` | `verify-deployment` | Docker / env / nginx / CI valid |
 | 6.8. Smoke test runtime | orchestrator (with user approval) | (custom per cycle) | Smoke doc created or skip justified |
-| 7. Final Audit | `final-auditor` | `run-audit` | Retro created **AND** vault backup done (exit 0) |
+| 7. Final Audit | `final-auditor` | `run-audit` | Retro created **AND** vault backup done (exit 0) **AND** `kuraka-doctor` verde |
 
 ### Conditional agents
 
@@ -419,10 +437,27 @@ metrics.
   python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-backup.py" <project-root> [--target <antigravity|claude|cursor|codex>]
   ```
   This is a hard exit criterion: Phase 7 is NOT complete until this command
-  exits 0. It (1) feeds `pattern-detector` across all projects and (2) preserves
+  exits 0 — and since 2026-09 it **refuses to close a cycle whose RETRO has no
+  `## Confidence:` line** (exit 1; the state is still snapshotted, it is the
+  CYCLE that stays open). That check lives in the script, not in a hook, because
+  the script is the only gate every platform runs: Antigravity / Cursor / Codex
+  have no hook API, and relying on prose there produced entire projects of
+  verdict-less cycles. A cycle archived with no telemetry is warned about, not
+  blocked. Deliberate exception: `--allow-incomplete-retro`. It (1) feeds `pattern-detector` across all projects and (2) preserves
   the cycle outside the solution's git so a branch switch can't lose it
   (`kuraka-restore.py` pastes it back on the next mount). If it is skipped for
   any reason, the cycle stays OPEN — do not report Phase 7 as done.
+- **Then verify the backup actually landed** (exit 0 is not evidence):
+  ```bash
+  python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-doctor.py" <project-root>
+  ```
+  It re-reads the store and confirms this cycle's RETRO is archived, its
+  telemetry attached, the agent tuning applied above is snapshotted, and
+  `docs/process` mirrored. Report its verdict in the RETRO. Non-zero closes
+  nothing: run `--fix` and re-check. Every silent breakage found in the
+  2026-08 store audit (a whole agent suite mis-snapshotted as "overrides",
+  telemetry never attached, a rename splitting a project's history) passed a
+  green `kuraka-backup` first.
 
 ---
 
@@ -502,6 +537,7 @@ For Normal mode, add at the start of the REQ:
 - [ ] Phase 6.8: Smoke test runtime (MANDATORY — skip only with explicit justification)
 - [ ] Phase 7: Final Audit (RETRO created)
 - [ ] Phase 7: Vault backup — `kuraka-backup.py` exited 0 (MANDATORY — closes the cycle)
+- [ ] Phase 7: State verified — `kuraka-doctor.py` sin hallazgos (el backup dejó lo que decía dejar)
 ```
 
 For Lite / Retroactive / Reduced-by-risk modes, see the templates in

@@ -3,12 +3,13 @@
 
 The registry (`projects/*.md`) is only as complete as what got registered. Projects
 mounted with the old `mount-kuraka.sh` flow (which didn't register) drift out of view.
-This scans the filesystem for the Kuraka marker (`.claude/agents/po-analyst.md`) and
-reconciles against the registry, in BOTH directions:
+This scans the filesystem for the Kuraka marker (`<platform>/agents/po-analyst.md`, any
+platform) and reconciles against the registry, in BOTH directions:
 
   - mounted + registered      → ✓ ok
   - mounted + NOT registered  → ❌ missing from registry (fix with --register)
   - registered + NOT mounted  → ⚠️ drift (registry points at a path with no live mount)
+  - one path, SEVERAL slugs   → ⚠️ split store (the solution was renamed) → kuraka-merge-project.py
 
 Read-only by default. With --register, the missing ones are added (via
 `kuraka-init.py --register-only`, which never overwrites config/layer). Registered-but-
@@ -37,7 +38,14 @@ for _s in (sys.stdout, sys.stderr):
 
 DEFAULT_VAULT = "/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka"
 DEFAULT_ROOTS = ["~/Desarrollos", "~/Documents/Trabajo"]
-MARKER = (".claude", "agents", "po-analyst.md")
+# A mount is recognised on ANY platform, not just Claude: an Antigravity-only
+# project (.agents/) used to be reported as "registered but NOT mounted".
+MARKERS = (
+    (".claude", "agents", "po-analyst.md"),
+    (".agents", "agents", "po-analyst.md"),
+    (".cursor", "agents", "po-analyst.md"),
+    (".codex", "agents", "po-analyst.toml"),
+)
 PRUNE = {"node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build",
          ".next", ".nuxt", "target", ".pytest_cache", "vendor", ".cargo"}
 
@@ -54,7 +62,7 @@ def find_mounts(roots: list[Path], max_depth: int) -> list[Path]:
             if depth > max_depth:
                 dirnames[:] = []
                 continue
-            if (d / Path(*MARKER)).exists():
+            if any((d / Path(*m)).exists() for m in MARKERS):
                 found.append(d)
                 dirnames[:] = []  # a Kuraka project — don't descend further
                 continue
@@ -63,12 +71,14 @@ def find_mounts(roots: list[Path], max_depth: int) -> list[Path]:
     return sorted({p.resolve() for p in found})
 
 
-def registry_paths(vault: Path) -> dict[Path, str]:
-    """Map registered project path -> registry note label.
+def registry_slugs(vault: Path) -> dict[Path, list[str]]:
+    """Map registered project path -> the slugs registered for it.
 
-    Reads the unified layout (projects/<slug>/registry.md) and, for transition,
-    any legacy top-level projects/*.md notes."""
-    out = {}
+    A path with MORE THAN ONE slug is a split store: the solution was renamed
+    (or onboarded before its config had a name), so its history lives in two
+    entries. Reads the unified layout (projects/<slug>/registry.md) and, for
+    transition, any legacy top-level projects/*.md notes."""
+    out: dict[Path, list[str]] = {}
     pdir = vault / "projects"
     if not pdir.is_dir():
         return out
@@ -78,9 +88,14 @@ def registry_paths(vault: Path) -> dict[Path, str]:
             m = re.match(r"^path:\s*(.+?)\s*$", line)
             if m:
                 label = note.parent.name if note.name == "registry.md" else note.name
-                out[Path(m.group(1).strip()).resolve()] = label
+                out.setdefault(Path(m.group(1).strip()).resolve(), []).append(label)
                 break
     return out
+
+
+def registry_paths(vault: Path) -> dict[Path, str]:
+    """Back-compat view of registry_slugs(): one label per path."""
+    return {p: slugs[0] for p, slugs in registry_slugs(vault).items()}
 
 
 def register(vault: Path, project: Path) -> bool:
@@ -108,7 +123,9 @@ def main() -> int:
     roots = [Path(r.strip()).expanduser() for r in args.roots.split(",") if r.strip()]
 
     mounted = [p for p in find_mounts(roots, args.depth) if p != vault]
-    reg = registry_paths(vault)
+    reg_all = registry_slugs(vault)
+    dupes = {p: s for p, s in reg_all.items() if len(s) > 1}
+    reg = {p: s[0] for p, s in reg_all.items()}
     reg_paths = set(reg)
     mounted_set = set(mounted)
 
@@ -126,9 +143,21 @@ def main() -> int:
     for p in sorted(drift):
         print(f"   ⚠️ registrado pero NO montado: {p}  ({reg[p]})")
 
+    for p, slugs in sorted(dupes.items()):
+        print(f"   ⚠️ store PARTIDO en {len(slugs)} slugs: {p}  ({', '.join(sorted(slugs))})")
+
     print("")
     print(f"   montados: {len(mounted)} · registrados: {len(reg_paths)} · "
-          f"sin registrar: {len(missing)} · drift: {len(drift)}")
+          f"sin registrar: {len(missing)} · drift: {len(drift)}"
+          + (f" · duplicados: {len(dupes)}" if dupes else ""))
+
+    if dupes:
+        print("")
+        print("   Un mismo directorio con dos slugs = la solución se renombró y su")
+        print("   historia quedó partida. Fusionalos (el segundo argumento es el que queda):")
+        for p, slugs in sorted(dupes.items()):
+            a, b = sorted(slugs)[:2]
+            print(f"     python3 kuraka-merge-project.py {a} {b} --dry-run")
 
     if missing and args.register:
         print("")

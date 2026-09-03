@@ -57,6 +57,7 @@ CMD_LABEL = {
     "inti": ("[descripción]", "Greenfield: entrevista de discovery para un proyecto sin código"),
     "arki": ("", "Greenfield: arquitectura inicial desde el discovery de inti"),
     "kuraka-backup": ("", "Respalda el estado Kuraka del proyecto al vault central"),
+    "kuraka-doctor": ("", "Verifica que el estado Kuraka del proyecto esté sano (config, layer, overrides, retros, telemetría)"),
     "kuraka-update": ("", "Actualiza el framework montado desde el vault"),
     "checkmarx-remediation": ("", "Remediación Checkmarx: tickets SAST/SCA/API → informe + checklist"),
     "sync-from-vault": ("", "(solo Claude) migra agents/skills/commands del vault al proyecto"),

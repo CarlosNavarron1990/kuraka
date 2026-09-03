@@ -86,3 +86,18 @@ Relative to `architecture.paths.frontend_root`.
 - Effects without correct dependency arrays (stale closures).
 - Fetch logic inline in components instead of an API client / data hook.
 - Uncontrolled re-renders from new object/array literals in props.
+
+
+## SPA navigation (RETRO-S12 Patch C, completed in RETRO-S9)
+- Internal routes: use `<Link to=...>` / router-aware nav from `react-router-dom`.
+  NEVER a raw `<a href>` for an in-app route — it forces a full page reload and
+  drops client-side state. Raw `<a>` is only for true external links.
+
+## Keyboard & dialog contracts (RETRO-S9, Phase 5 findings)
+- A keyboard handler on a NESTED interactive element must `stopPropagation()`
+  for every key an ancestor also handles — otherwise one keypress fires both
+  (S9: ArrowUp nudged the node AND panned the canvas; the focused node moved
+  the wrong way). `preventDefault()` alone does not stop the ancestor.
+- `role="dialog"` is a contract, not a label: `aria-modal="true"`, move focus
+  into the dialog on open, close on `Escape`, and keep the page behind
+  non-tabbable. Cover Escape-close with a test.

@@ -369,6 +369,300 @@ pasan, y el ejercicio encontró un bug propio.
   la story S2 de ese proyecto usará para el indicador de drift. Queda como
   pregunta abierta del ciclo S9 (ver su `docs/process/INPUT-S9-ayllu-map.md`).
 
+### Corregido — Subsistema de overrides / backup central (2026-08-29)
+
+Auditoría del store central (`projects/`) tras validar `kuraka-backup`. Dos
+defectos con efecto directo sobre proyectos reales:
+
+- **La línea base del mount manifest era el hash del vault, no el del render.**
+  En Antigravity/Cursor/Codex el mount ESCRIBE un render (frontmatter Claude
+  restado, discipline re-expandida, rutas proyectadas), así que ningún archivo
+  montado coincidía nunca con su baseline: **la suite entera se clasificaba
+  como “tuning del proyecto”** (petsuite `.agents` 104, camisassis 153,
+  `.codex` 52), se respaldaba y se re-aplicaba en cada mount, y el proyecto
+  quedaba **congelado** en una versión vieja del framework (el `amauta` de
+  petsuite seguía en la descripción anterior a `239262a`, 2026-08-23, con
+  manifest del mismo día). Ahora el render vive en
+  `kuraka_common.render_for_platform` / `render_vault_content` — la MISMA
+  función que usa `kuraka-mount.copy_file` — y `write_mount_manifest` hashea su
+  salida. `detect_overrides` además reconoce el render actual del vault (sirve
+  para mounts legacy sin manifest) y el fallback de historia git ahora renderiza
+  cada versión histórica para la plataforma. Efecto medido: petsuite `.agents`
+  104 → 4, camisassis 153 → 65 (los 65 son skills de terceros reales),
+  `.codex` 52 → 0, chattubd/clinica/guai/kuraka-control/petsuite/simuladorcostos
+  (claude) → 0. Mount limpio de las tres plataformas: **0 overrides**.
+- **El store de overrides era plano y la plataforma se autodetectaba.**
+  Un proyecto montado para varias plataformas a la vez (PetSuite tiene
+  `.claude/` y `.agents/`) tenía un único `overrides/`: el último snapshot
+  ganaba y un restore podía pegar el render de Antigravity dentro del mount de
+  Claude (frontmatter de arnés perdido, rutas reescritas). El pre-flight de
+  `kuraka-mount` además llamaba a `kuraka-backup --overrides-only` **sin
+  `--target`**. Ahora el store es `overrides/<plataforma>/<cat>/…` (con
+  migración automática del layout plano, leyendo la plataforma del `MANIFEST.md`
+  viejo), `restore_overrides` lee sólo su plataforma, y la resolución de
+  plataforma es explícita (`kuraka_common.detect_platform`: `--platform` >
+  `--target` > `$KURAKA_TARGET` > manifest más reciente > `.claude`).
+
+Otros ajustes del mismo pase:
+
+- `_skill_dir_canonical` ya no fuerza `skills/<n>/SKILL.md` → `skills/<n>.md`:
+  el vault tiene ambas formas y las skills sólo-directorio (`sentry-triage`,
+  `sync-codex-parity`) se leían como archivos custom en 5 proyectos.
+- Artefactos del mount de Codex que no son copias (skill nativa reconstruida por
+  `sync_codex_skills`, comando publicado como skill por `kuraka-export`, bloque
+  `kuraka-codex-entrypoint`) ya no cuentan como override.
+- `copy_file` y la proyección de skills Codex escriben con `newline="\n"`, para
+  que la línea base valga también en Windows.
+- `backup.yaml` gana `last_overrides`: un `--overrides-only` (pre-flight del
+  mount) ya no finge un backup completo, pero deja constancia. El pre-flight
+  sólo toca el sidecar de proyectos **registrados** (antes dejaba rastro en
+  `projects/` al montar un target desechable).
+- Tests: `tests-vault/test_overrides_store.py` (11 casos) cubre línea base
+  renderizada, mount limpio sin overrides, tuning real sí detectado, store por
+  plataforma, migración del layout legacy y resolución de plataforma.
+
+### Corregido — Identidad de proyecto en el store central (2026-08-30)
+
+El store se indexa por slug (`kuraka.config.yaml project.name`, si no el nombre de
+la carpeta), así que **renombrar una solución partía su historia en dos entradas**.
+Había tres pares apuntando al mismo directorio: `plugginsqlagent`+`dbcanvas`,
+`facturacion`+`facturacion-honorarios` y `parplus`+`parplus-src-package-json-2-
+appparplus-slugified`.
+
+- **`kuraka-merge-project.py`** (nuevo) — fusiona dos entradas del store:
+  une `layer/`, `state/`, `cycles/` y `overrides/<plataforma>/` sin pisar el
+  destino (conflicto = gana el destino y se reporta; `--prefer-source` invierte),
+  funde `backup.yaml` (unión de ramas, la fecha más reciente de cada campo),
+  re-apunta las filas de `INDEX.md`, deja el nombre viejo como `aliases:` +
+  “Historial de nombres” en el registry, y borra la entrada origen al final.
+  `--dry-run` por defecto en la recomendación; avisa si los dos registros apuntan
+  a rutas distintas (no sería un rename).
+- **`project_slug` endurecido** — el escaneo tomaba cualquier `name:` indentado
+  bajo `project:`, así que una línea dentro de un `description: |` generó el slug
+  `parplus-src-package-json-2-appparplus-slugified`. Ahora sólo acepta un hijo
+  directo de `project:` (≤ 4 espacios) y valida que el valor parezca un nombre
+  (`_plausible_project_name`: sin `/`, sin `:`, ≤ 3 espacios, slug ≤ 40 chars);
+  si no, cae al nombre de la carpeta.
+- **`kuraka-discover.py`** — reporta `store PARTIDO en N slugs` con el comando de
+  fusión listo para copiar, y reconoce mounts de CUALQUIER plataforma
+  (`.agents/`, `.codex/`, `.cursor/`): camisassis, montado sólo para Antigravity,
+  figuraba como “registrado pero NO montado”.
+- Tests: `tests-vault/test_store_identity.py` (10 casos) — derivación de slug,
+  el bloque plegado que ya no puede secuestrarlo, detección de duplicados, marcador
+  multi-plataforma, y las tres garantías del merge (fusiona, no pisa, dry-run).
+
+### Corregido — Adopción automática y deriva de slug (2026-08-31)
+
+Reportado desde guai-home-marketplace: proyectos sin `kuraka.config.yaml` y con
+retros/telemetría mal mapeados. Causa raíz: **el mount nunca creaba los artefactos
+de adopción**, solo imprimía cómo crearlos. `kuraka-init.py` sí los genera, pero es
+el entry point “recomendado”, no el que se usa a diario — el flujo documentado de
+cambio de rama es `mount-kuraka`. Resultado: 5 de 15 proyectos montados corrían sin
+config (guai, sie-integraciones, simuladorcostos, chattubd, sisgovari), y sin
+`docs_process_root` declarado los agentes improvisaron la ruta de salida: guai
+terminó con sus retros repartidos entre `docs/process/retros/` (41) y
+`docs/process/agent-retrospectives/` (59), 36 de ellos duplicados. Los proyectos
+CON config tienen los retros en un solo directorio — la correlación es 1:1.
+
+- **`kuraka-init.py --adopt`** (nuevo) — dibuja solo los artefactos de adopción que
+  falten: el DRAFT de `kuraka.config.yaml` (desde `kuraka-inspect`, con TODOs) y el
+  esqueleto del layer. No pisa nada, no monta, no registra. `--layer-root` lo hace
+  consciente de la plataforma (`.agents/project`, `.codex/project`), igual que
+  `write_project_skeleton` / `project_layer_populated`, que estaban clavados en
+  `.claude/project`.
+- **`kuraka-mount.py`** lo invoca cuando falta el config o el layer. Un mount limpio
+  ya no imprime “ADOPCIÓN INCOMPLETA”; un segundo mount es no-op.
+- **Guard de deriva de slug** (`kuraka_common.registered_slug_for_path`) — el store
+  se indexa por `project.name` del config, así que editar ese nombre arrancaba un
+  SEGUNDO store para el mismo directorio y dejaba la historia varada en el viejo.
+  El config de guai (escrito por `amauta`) decía `guaihome-marketplace` mientras su
+  store —1081 archivos, 62 ciclos— vive en `guai-home-marketplace`: el siguiente
+  backup lo habría partido. Ahora `kuraka-backup` y el upsert del registry conservan
+  el slug REGISTRADO, avisan por stderr y sugieren `kuraka-merge-project.py` para
+  oficializar un rename. `--name` sigue mandando por encima.
+- Tests: 5 casos nuevos en `tests-vault/test_store_identity.py` (draft de config +
+  esqueleto, idempotencia, layer-root por plataforma, el guard, y el override
+  explícito con `--name`).
+
+### Corregido — Telemetría rezagada y join por REQ corto (2026-08-31)
+
+Detectado al pasar `--update` + backup por los 15 proyectos montados y auditar el
+resultado archivo por archivo (no por código de salida):
+
+- **Un ciclo ya archivado se saltaba entero**, y la telemetría se escribe DESPUÉS
+  del RETRO (el final-auditor cierra el ciclo, el dashboard agrega más tarde): el
+  ciclo archivado sin telemetría se quedaba así para siempre salvo `--force`.
+  `archive_cycles` ahora adjunta la telemetría rezagada y corrige `has_telemetry`
+  en el `meta.yaml` (`_attach_late_telemetry`).
+- **El join era el nombre exacto de archivo**, pero los proyectos nombran la
+  telemetría con el REQ corto y el RETRO con el slug completo
+  (`REQ-20260813-REQ-011-telemetry.json` ↔
+  `RETRO-REQ-20260813-REQ-011-slot-duration-overlap-prevention.md`): 7 de los 14
+  archivos de telemetría de petsuite nunca llegaban al store. `_find_telemetry`
+  hace un match relajado por prefijo, sólo si el prefijo corta en un `-` del REQ,
+  mide ≥ 12 caracteres y hay **exactamente un** candidato — nunca adivina.
+  Cobertura de telemetría en el store: petsuite 2/56 → 9/56, total 189 ciclos con
+  102 telemetrías adjuntas.
+- **Y el sufijo tampoco era obligatorio en la práctica**: adela escribe
+  `docs/process/agent-telemetry/<REQ>.json`, sin `-telemetry`. Dentro de ese
+  directorio un `.json` ES telemetría, por ubicación, así que ahora también se
+  acepta esa forma (`_telemetry_stem`); `DASHBOARD.md` queda fuera por extensión.
+- Tests: `tests-vault/test_cycle_archive.py` (8 casos) — adjunte exacto, adjunte
+  rezagado sin `--force`, match por REQ corto, nombre sin sufijo, y las cuatro
+  negativas (prefijo ambiguo, prefijo que no corta en frontera, stem demasiado
+  corto, dashboard).
+
+Pasada operativa del mismo día: `kuraka-mount --update` + backup completo en los 15
+proyectos montados (17 plataformas). Chequeo posterior de config, layer, manifest de
+mount, coherencia overrides-vivos↔store, RETROs archivados, telemetría y state:
+**cero hallazgos abiertos** (el nombre de guai en su config se alineó a
+`guai-home-marketplace`, el slug con el que vive su store de 62 ciclos).
+
+Cobertura de telemetría tras los arreglos: **103 de 189 ciclos**. Los 86 restantes
+NO son un fallo de mapeo — son ciclos que nunca la escribieron. Dos causas, ambas
+del lado del proyecto: los 16 ciclos de camisassis son del 10–12 de agosto,
+anteriores al bloque `discipline/telemetry.md` (23 de agosto) que da la instrucción
+manual a las plataformas sin hooks; y en general las plataformas no-Claude no tienen
+el `PostToolUse` que en Claude escribe la entrada sola. Verificado que la prosa
+manual SÍ llega expandida al mount de Antigravity de camisassis (y que no queda
+ningún marcador `kuraka:discipline:` sin expandir).
+
+### Añadido — `kuraka-doctor`: la verificación deja de ser manual (2026-08-31)
+
+Cierre de los tres pases de arreglos anteriores. Todos los defectos que se
+corrigieron a mano eran **silenciosos**: el mount salía 0, el backup salía 0, y el
+store igual estaba mal. Un código de salida no es evidencia, así que la
+verificación que se hizo a mano ahora es una herramienta cableada al ciclo de vida.
+
+- **`kuraka-doctor.py`** (nuevo) — chequea el RESULTADO, por proyecto o `--all`:
+  registro en el store, `kuraka.config.yaml` presente y con `project.name` de
+  acuerdo con el slug que el store ya usa, layer de especialización, mount
+  manifest por plataforma estampado con la suite vigente, ajustes locales de
+  agentes en sincronía con el store, RETROs archivados, telemetría adjunta y
+  `docs/process` espejado. Exit 0 sano · 1 hallazgos.
+  `--fix` aplica solo lo seguro (redactar config/layer, registrar, re-sincronizar
+  overrides, backup completo) y vuelve a diagnosticar. Dos cosas NO se arreglan
+  solas, a propósito: un manifest ausente pide `--update` (regenerarlo desde los
+  archivos actuales congelaría un ajuste real del proyecto como línea base), y un
+  desajuste de slug es una decisión de nomenclatura, nunca una reescritura
+  automática.
+- **Cableado al ciclo de vida**, para que nadie tenga que acordarse:
+  `SessionStart` (hook `session_doctor.py`, solo Claude: calla si está sano, nunca
+  bloquea), preflight de `skills/kuraka.md` §Prerequisites, gate de la Fase 7
+  (ahora exige RETRO + backup en 0 + **doctor verde**, en `kuraka.md` y en el paso
+  10 nuevo de `run-audit.md`), y la cola de cada `kuraka-mount.py`.
+  Comando `/kuraka-doctor` para las corridas a mano.
+- `repair()` invoca los scripts hermanos por `__file__`, no por `--vault`: el
+  vault dice qué store y qué baseline usar, no dónde viven las herramientas.
+- Tests: `tests-vault/test_doctor.py` (10 casos) — proyecto sano en verde, cada
+  hallazgo detectado y reparado, el desajuste de slug reportado pero jamás
+  auto-aplicado, el manifest pidiendo re-mount, silencio fuera de un proyecto
+  Kuraka, y las tres garantías del hook (calla si está sano, reporta sin bloquear,
+  inerte fuera de Kuraka).
+
+Estrenándolo se encontró de inmediato lo que buscaba: dos proyectos con la
+proyección Codex de `run-audit` desactualizada respecto del vault. `--update` en
+ambos y **los 15 proyectos quedaron en verde** (`kuraka-doctor --all` → rc 0).
+
+### Corregido — El veredicto del RETRO no era contrato de nadie (2026-08-31)
+
+Pregunta de partida: qué pasó con los RETROs que produjeron los agentes de
+Antigravity. Están **archivados y completos** (camisassis 16/16, petsuite 56/56,
+sisgovari; ningún archivo perdido), pero llegan al store con sus dos dimensiones
+diagnósticas vacías: `verdict: ""` y `has_telemetry: false`. Un ciclo así aparece
+en `projects/INDEX.md` como una fila sin veredicto, y `pattern-detector` no puede
+compararlo con nada.
+
+La causa no es de plataforma, y ese fue el hallazgo: **la línea
+`## Confidence:` del ARCHIVO RETRO no estaba pedida en ningún lado**.
+`skills/run-audit.md`, que define el documento, nunca la mencionó; lo que existe
+es el contrato de salida del AGENTE, que en Claude sostiene el hook
+`output_validate.py` (SubagentStop) y en el resto solo la prosa de
+`discipline/output-validation.md` — y ambos hablan de la *respuesta*, no del
+archivo. Por eso el agujero es transversal: 30% de los 189 ciclos del store
+tienen veredicto, y los que faltan incluyen 35 de guai (Claude), 46 de petsuite
+y los 16 de camisassis.
+
+- **`skills/run-audit.md` §7** ahora declara el contrato del ARCHIVO: última
+  línea `## Confidence: HIGH | MEDIUM | LOW`, con el porqué (lo parsea
+  `find_verdict` hacia `meta.yaml` y hacia el INDEX cross-project) y la
+  advertencia de no delegarlo en el recordatorio de la plataforma.
+- **`_refresh_verdict`** — un ciclo ya archivado con veredicto vacío lo rellena
+  solo en cuanto el RETRO gana su línea, sin `--force` (mismo criterio que la
+  telemetría rezagada). Editar un RETRO viejo y re-correr el backup ahora basta.
+- **`kuraka-doctor` chequea `verdict`**, acotado a lo accionable: solo el ÚLTIMO
+  ciclo cerrado — el que todavía se puede arreglar — y menciona el histórico como
+  contexto, para no convertir 47 archivos viejos en una tarea pendiente eterna.
+- Tests: 2 casos nuevos en `test_cycle_archive.py` (la línea se vuelve veredicto
+  archivado; un veredicto agregado después llega al ciclo ya archivado) y 1 en
+  `test_doctor.py` (RETRO sin la línea → hallazgo).
+
+Nota sobre la telemetría de Antigravity: ahí no hay `PostToolUse` que la escriba
+sola (los hooks son solo de Claude), así que depende de la prosa manual de
+`discipline/telemetry.md` — que entró el 23 de agosto, después de los 16 ciclos
+de camisassis. Verificado que hoy esa prosa SÍ llega expandida a su mount.
+
+### Corregido — El enforcement deja de ser Claude-only (2026-09-01)
+
+Pregunta de partida: qué pasa con Codex y Antigravity. La posición documentada
+del framework era «solo el *enforcement* es Claude-only; el resto recibe la
+prosa» (`ROADMAP-CLAUDE-10.md` §98) — y eso es exactamente lo que falló:
+camisassis, montado solo para Antigravity, cerró **16 ciclos de 16** sin
+veredicto y sin telemetría, con la prosa correctamente expandida en su mount.
+La prosa no es un control.
+
+El control ahora vive donde **todas** las plataformas pasan sí o sí: los scripts
+Python. La Fase 7 ya exigía «`kuraka-backup` sale 0», así que:
+
+- **`kuraka-backup.py` no cierra un ciclo cuyo RETRO no tenga
+  `## Confidence:`** — exit 1, con el estado igualmente respaldado (lo que queda
+  abierto es el CICLO, no el backup). Alcance deliberado: lo que esta corrida
+  archivó **más el último ciclo del store** (`kuraka_common.latest_cycle`) — sin
+  esa segunda mitad bastaba re-correr el backup para blanquearlo, porque el
+  ciclo ya archivado se saltaba. El montón histórico lo reporta el doctor, nunca
+  bloquea. Telemetría ausente: warning explícito, no bloqueo (un veredicto es un
+  juicio que el auditor debe dar; la telemetría puede no existir en una
+  plataforma sin métricas). Excepción: `--allow-incomplete-retro`.
+- **`retro_contract.py`** (hook nuevo, PostToolUse/Write, solo Claude) adelanta
+  el mismo control al momento de escribir el RETRO: exit 2 una vez por archivo,
+  con loop-guard, para que el agente agregue la línea antes de seguir.
+- `kuraka-doctor` marca además **el último ciclo cerrado sin telemetría** — antes
+  solo detectaba telemetría existente-pero-no-adjunta, así que un ciclo cerrado
+  sin ninguna pasaba invisible.
+- Tests: 5 casos nuevos en `test_cycle_archive.py` ejecutando el backup **contra
+  un proyecto Antigravity** (sin hooks): no cierra sin veredicto, re-correr no lo
+  blanquea, agregar la línea lo cierra, la telemetría avisa sin bloquear, y el
+  escape es explícito. Más 6 en `test_retro_contract.py` para el hook.
+
+Resultado por plataforma: en Claude hay prevención determinista al escribir; en
+Antigravity / Cursor / Codex hay **bloqueo determinista al cerrar**, sin depender
+de ninguna API de hooks del editor.
+
+### Corregido — El mount dejaba de refrescar archivos para siempre (2026-09-01)
+
+Encontrado al propagar lo anterior: 13 proyectos seguían con un `run-audit`
+viejo pese a que cada `--update` reportaba éxito.
+
+- **`sync_tree` traía la semántica `rsync --update`**: «si el destino es más
+  nuevo, no copies». `restore_overrides` re-aplica los overrides con `copy2`, así
+  que **cualquier archivo que alguna vez fue override quedaba permanentemente más
+  nuevo que el vault y el mount dejaba de refrescarlo** — clavado en una versión
+  vieja del framework incluso después de que el override desapareciera del store,
+  y sin un solo mensaje. Ahora `copy_file` es *content-addressed*: escribe cuando
+  el contenido difiere de lo que el mount debe dejar, y no escribe (ni toca
+  mtimes) cuando ya coincide. El tuning local lo preserva el subsistema de
+  overrides, que es el mecanismo diseñado para eso — nunca el negarse a copiar.
+- Al quitar el guard salió a la luz lo que enmascaraba: el vault tiene 27 skills
+  en **doble forma** (`skills/<n>.md` plana y `skills/<n>/SKILL.md`), y la copia
+  del directorio pisaba el render de la plana (en `run-audit` diferían 44
+  líneas). Regla explícita ahora en los tres montajes (Claude, Antigravity,
+  Codex): **la skill plana es la fuente y es dueña de `SKILL.md`**; el directorio
+  aporta solo sus archivos extra (`rules/`, `references/`).
+- Gotcha operativo documentado en `CLAUDE.md`: editar el vault, montar, y volver
+  a editar sin commitear genera una versión intermedia que no matchea ni el vault
+  actual ni ninguna versión commiteada, así que se respalda como override falso y
+  se re-aplica en cada mount. Fue el origen de este caso.
+
 ## [1.1.0] — 2026-08-01 (primer harvest)
 
 ### Añadido

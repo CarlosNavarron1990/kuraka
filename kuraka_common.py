@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -59,6 +60,12 @@ def project_slug(project: Path, override: str | None = None) -> str:
     Reading `project.name` first is what keeps init/archive/backup/restore in
     agreement — keying off the folder name vs the config name was the source of
     the clinica `clinicaDental2026` vs `clinica-dental-2026` drift.
+
+    The config value is only accepted if it LOOKS like a name (see
+    `_plausible_project_name`): the old scan matched any indented `name:` under
+    `project:`, so a `description: |` block mentioning a path produced the slug
+    `parplus-src-package-json-2-appparplus-slugified` — a second, orphan entry in
+    the central store for a project that already had one.
     """
     if override:
         return slugify(override)
@@ -70,12 +77,31 @@ def project_slug(project: Path, override: str | None = None) -> str:
                 in_project = True
                 continue
             if in_project:
-                m = re.match(r"^\s+name:\s*(.+?)\s*$", line)
+                # only a direct child of `project:` (<= 4 spaces), never a line
+                # inside a nested block or a folded description
+                m = re.match(r"^ {1,4}name:\s*(.+?)\s*$", line)
                 if m:
-                    return slugify(m.group(1).strip().strip("\"'"))
+                    raw = m.group(1).strip().strip("\"'")
+                    if _plausible_project_name(raw):
+                        return slugify(raw)
+                    break  # implausible → fall back to the folder name
                 if re.match(r"^\S", line):  # left the project: block
                     break
     return slugify(project.name)
+
+
+MAX_SLUG_LEN = 40
+
+
+def _plausible_project_name(raw: str) -> bool:
+    """A project name, not a path/sentence swept up from a YAML block."""
+    if not raw or raw.startswith(("|", ">", "#", "{", "[")):
+        return False
+    if any(ch in raw for ch in "/\\:"):
+        return False
+    if raw.count(" ") > 3 or len(slugify(raw)) > MAX_SLUG_LEN:
+        return False
+    return True
 
 
 def git_branch(project: Path) -> str:
@@ -118,8 +144,78 @@ def cycles_dir(vault: Path, slug: str) -> Path:
     return project_dir(vault, slug) / "cycles"
 
 
-def overrides_dir(vault: Path, slug: str) -> Path:
+def overrides_root(vault: Path, slug: str) -> Path:
     return project_dir(vault, slug) / "overrides"
+
+
+def store_platform(platform: str) -> str:
+    """Store folder name for a platform: 'antigravity', not its dir name
+    'agents' — that one collides with the OVERRIDE_CATEGORIES entry of the same
+    name and would make a legacy-layout migration ambiguous."""
+    key = platform_key(platform)
+    return "antigravity" if key == "agents" else key
+
+
+def overrides_dir(vault: Path, slug: str, platform: str = "claude") -> Path:
+    """Overrides are stored PER PLATFORM (overrides/<platform>/<cat>/…).
+
+    A project can be mounted for several platforms at once (PetSuite has both
+    .claude/ and .agents/); a single flat store made the last snapshot win and
+    let a restore paste one platform's render into another platform's mount."""
+    return overrides_root(vault, slug) / store_platform(platform)
+
+
+def registered_slug_for_path(vault: Path, project: Path) -> str | None:
+    """The slug already registered in the central store for THIS directory.
+
+    The guard against a silent store split: `project_slug` derives the slug from
+    `kuraka.config.yaml project.name`, so writing (or letting `amauta` write) a
+    name that differs from the registered one would start a SECOND store for the
+    same project and strand its history in the old one — how guai-home-marketplace
+    (62 ciclos) nearly became `guaihome-marketplace` in 2026-08."""
+    root = store_root(vault)
+    if not root.is_dir():
+        return None
+    want = project.resolve()
+    for note in sorted(root.glob("*/registry.md")):
+        for line in note.read_text(encoding="utf-8", errors="ignore").splitlines():
+            m = re.match(r"^path:\s*(.+?)\s*$", line)
+            if m:
+                try:
+                    if Path(m.group(1).strip()).resolve() == want:
+                        return note.parent.name
+                except OSError:
+                    pass
+                break
+    return None
+
+
+def detect_platform(project: Path, target: str | None = None,
+                    platform: str | None = None) -> str:
+    """Which platform dir a backup/restore should act on.
+
+    Precedence: explicit --platform > explicit --target > $KURAKA_TARGET > the
+    mounted platform dir with the most recent mount manifest > .claude > any
+    other platform dir. Explicit wins because a project can be mounted for
+    several platforms at once: autodetecting there picked the wrong store and
+    let one platform's snapshot overwrite another's."""
+    if platform:
+        return platform_key(platform)
+    if target:
+        return platform_key(target)
+    env = os.environ.get("KURAKA_TARGET", "").strip()
+    if env:
+        return platform_key(env)
+    candidates = [p for p in ("claude", "agents", "codex", "cursor")
+                  if (project / f".{p}" / "agents").is_dir()
+                  or (project / f".{p}" / "skills").is_dir()]
+    if not candidates:
+        return "claude"
+    mounted = [(p, (project / f".{p}" / MOUNT_MANIFEST_NAME)) for p in candidates]
+    mounted = [(p, m.stat().st_mtime) for p, m in mounted if m.is_file()]
+    if mounted:
+        return max(mounted, key=lambda x: x[1])[0]
+    return "claude" if "claude" in candidates else candidates[0]
 
 
 def has_history(vault: Path, slug: str) -> bool:
@@ -192,6 +288,183 @@ def strip_claude_frontmatter(text: str) -> str:
     return "---" + "\n".join(kept) + text[end:]
 
 
+# --- platform rendering (single source of truth) ------------------------------
+# What a mount actually WRITES for a given platform. kuraka-mount.py::copy_file
+# delegates here, and write_mount_manifest() hashes the output of the very same
+# function — that is what makes the mount manifest a valid baseline on non-Claude
+# platforms. Before this existed the manifest stored the *vault* hash while the
+# mounted file was a render, so every mounted file on Antigravity/Cursor/Codex
+# read as a "project override" (petsuite 104, camisassis 153, codex 52), the
+# whole suite got snapshotted and re-applied on each mount, and the project was
+# frozen on an old framework version forever.
+
+_DISCIPLINE_RE = re.compile(r"<!-- kuraka:discipline:([A-Za-z0-9_-]+) -->")
+
+# platform alias -> platform directory name (the dir is `.<name>`)
+_PLATFORM_ALIASES = {"antigravity": "agents", "agents": "agents",
+                     "claude": "claude", "codex": "codex", "cursor": "cursor"}
+
+
+def platform_key(platform: str) -> str:
+    """Normalize a platform/target name to its directory name without the dot
+    ('antigravity' -> 'agents', '.codex' -> 'codex')."""
+    p = (platform or "claude").lstrip(".").strip().lower()
+    return _PLATFORM_ALIASES.get(p, p)
+
+
+def platform_dirname(platform: str) -> str:
+    """'.claude', '.agents', '.codex', '.cursor'."""
+    return f".{platform_key(platform)}"
+
+
+def expand_discipline(text: str, vault: Path) -> str:
+    """Expand `<!-- kuraka:discipline:<name> -->` markers with the full manual
+    discipline prose from <vault>/discipline/<name>.md. Claude renders keep the
+    slim hook-note + marker (the harness enforces the rule there); non-Claude
+    renders get the complete manual discipline back, so no platform loses the
+    rule when Claude's prompts slim down."""
+    def _sub(m: "re.Match[str]") -> str:
+        block = vault / "discipline" / f"{m.group(1)}.md"
+        if block.is_file():
+            return block.read_text(encoding="utf-8", errors="ignore").rstrip("\n")
+        return m.group(0)
+
+    return _DISCIPLINE_RE.sub(_sub, text)
+
+
+def adapt_antigravity_paths(text: str) -> str:
+    """.claude/<x>/ -> .agents/<x>/ path projection for the Antigravity mount."""
+    for sub in ("skills", "rules", "agents", "project", "stack-profiles", "templates"):
+        text = text.replace(f".claude/{sub}/", f".agents/{sub}/")
+    return text
+
+
+def adapt_codex_paths(text: str) -> str:
+    """Translate Claude paths and command mentions to the Codex projection.
+
+    Root Markdown skills become SKILL.md directories in Codex, so convert the
+    common explicit `.md` references before applying the broader replacements."""
+    text = re.sub(r"\.claude/skills/([A-Za-z0-9_-]+)\.md",
+                  r".codex/skills/\1/SKILL.md", text)
+    text = (text.replace(".claude/skills/", ".codex/skills/")
+                .replace(".claude/rules/", ".codex/rules/")
+                .replace(".claude/agents/", ".codex/agents/")
+                .replace(".claude/project/", ".codex/project/")
+                .replace(".claude/stack-profiles/", ".codex/stack-profiles/")
+                .replace(".claude/templates/", ".codex/templates/")
+                .replace(".claude/", ".codex/")
+                .replace("Requires a Claude Code restart afterward.",
+                         "Requires a new Codex session afterward."))
+    text = text.replace(
+        'kuraka-backup.py" <project-root>',
+        'kuraka-backup.py" <project-root> --layer-root .codex/project --skip-overrides',
+    )
+    for name in ("checkmarx-remediation", "kuraka-wizard", "kuraka-backup",
+                 "kuraka-update", "kuraka", "amauta", "inti", "arki"):
+        text = text.replace(f"/prompts:{name}", f"${name}")
+        text = re.sub(rf"(?<![A-Za-z0-9_.$/])/{re.escape(name)}(?![A-Za-z0-9_.-])",
+                      f"${name}", text)
+    return text
+
+
+def render_for_platform(text: str, platform: str, vault: Path) -> str:
+    """The exact content a mount of `platform` writes for a vault .md file.
+
+    Claude is the identity render (byte-identical copy of the vault superset);
+    every other platform SUBTRACTS the Claude-only frontmatter, re-expands the
+    manual discipline prose, and applies its path projection."""
+    plat = platform_key(platform)
+    if plat == "claude":
+        return text
+    text = strip_claude_frontmatter(text)
+    text = expand_discipline(text, vault)
+    if plat == "agents":
+        return adapt_antigravity_paths(text)
+    if plat == "codex":
+        return adapt_codex_paths(text)
+    return text  # cursor: no path projection at copy time
+
+
+def split_frontmatter(text: str) -> "tuple[dict[str, str], str]":
+    """(frontmatter mapping, body) for a Markdown file. Flat single-line keys
+    only — enough for the name/description a Codex skill header needs."""
+    fm: dict[str, str] = {}
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            for raw in text[3:end].splitlines():
+                if ":" not in raw:
+                    continue
+                k, _, v = raw.partition(":")
+                fm[k.strip()] = v.strip().strip('"').strip("'")
+            return fm, text[end + 4:].lstrip("\n")
+    return fm, text
+
+
+CODEX_SKILL_PLATFORM_OVERRIDE_FOR = {"kuraka", "kuraka-policies"}
+
+_CODEX_SKILL_PLATFORM_OVERRIDE = """## Codex Platform Override
+
+This override takes precedence over Claude-specific wording below. When the
+workflow says to invoke an agent, delegate to the matching native custom agent
+in `.codex/agents/<name>.toml`, wait for its structured handoff, and apply the
+gate before the next phase. The orchestrator never adopts a specialist role.
+
+Codex may not expose Claude's `<usage>` block. Keep the telemetry file and
+record phase, agent, attempt, timestamps, status, and produced artifacts.
+Record unavailable token, tool-use, or duration values as `null` or `unknown`;
+never fabricate `0`. Missing optional usage metrics do not block a gate.
+
+"""
+
+
+def codex_skill_text(name: str, description: str, body: str, source_kind: str) -> str:
+    """Render a Codex-native SKILL.md. Codex discovers project-local skills only
+    from .codex/skills/<name>/SKILL.md, so vault skills and Kuraka agents are
+    normalized into that shape for the Codex target."""
+    description = adapt_codex_paths(description)
+    body = adapt_codex_paths(body)
+    override = (_CODEX_SKILL_PLATFORM_OVERRIDE
+                if name in CODEX_SKILL_PLATFORM_OVERRIDE_FOR else "")
+    return (
+        "---\n"
+        f"name: {name}\n"
+        f'description: "{description}"\n'
+        "---\n\n"
+        f"> Kuraka Codex {source_kind}. Loaded from this project via `.codex/skills/{name}/SKILL.md`.\n\n"
+        f"{override}"
+        f"{body.lstrip()}"
+    )
+
+
+def render_vault_content(text: str, platform: str, vault: Path,
+                         cat: str | None = None,
+                         vault_rel: "Path | None" = None) -> str:
+    """What a mount writes for the vault file `<cat>/<vault_rel>`.
+
+    Same as render_for_platform, except for the one category a platform does not
+    merely copy: Codex rebuilds each root skill as a native SKILL.md
+    (sync_codex_skills), so its baseline is that projection, not the copy."""
+    if (platform_key(platform) == "codex" and cat == "skills"
+            and vault_rel is not None and len(vault_rel.parts) == 1):
+        fm, body = split_frontmatter(text)
+        name = fm.get("name") or vault_rel.stem
+        desc = fm.get("description") or f"Kuraka workflow skill: {name}"
+        return codex_skill_text(name, desc, body, "skill")
+    return render_for_platform(text, platform, vault)
+
+
+def _render_hash(data: bytes, platform: str, vault: Path,
+                 cat: str | None = None, vault_rel: "Path | None" = None) -> str:
+    """sha256 of `data` as the mount would write it (identity for claude)."""
+    if platform_key(platform) == "claude":
+        return hashlib.sha256(data).hexdigest()
+    # errors="ignore" mirrors kuraka-mount.copy_file's own read of the source.
+    rendered = render_vault_content(data.decode("utf-8", errors="ignore"),
+                                    platform, vault, cat, vault_rel)
+    return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
 def _file_hash(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
@@ -219,7 +492,7 @@ def suite_version(vault: Path) -> str:
 def mounted_suite_version(project: Path, platform: str = "claude") -> str:
     """Suite version recorded in the project's mount manifest ('unknown' for
     legacy mounts that pre-date SUITE-VERSION)."""
-    p_name = f".{platform}" if not platform.startswith(".") else platform
+    p_name = platform_dirname(platform)
     p = project / p_name / MOUNT_MANIFEST_NAME
     if not p.is_file() and p_name != ".claude":
         p = project / ".claude" / MOUNT_MANIFEST_NAME
@@ -233,7 +506,7 @@ def mounted_suite_version(project: Path, platform: str = "claude") -> str:
 def load_mount_manifest(project: Path, platform: str = "claude") -> dict[str, str]:
     """Vault-baseline hashes recorded at mount time ('<cat>/<rel>' -> sha256).
     Empty dict when the project pre-dates the manifest (legacy mounts)."""
-    p_name = f".{platform}" if not platform.startswith(".") else platform
+    p_name = platform_dirname(platform)
     p = project / p_name / MOUNT_MANIFEST_NAME
     if not p.is_file() and p_name != ".claude":
         p = project / ".claude" / MOUNT_MANIFEST_NAME
@@ -252,11 +525,15 @@ def load_mount_manifest(project: Path, platform: str = "claude") -> dict[str, st
 def write_mount_manifest(project: Path, vault: Path,
                          categories: tuple[str, ...] = OVERRIDE_CATEGORIES,
                          platform: str = "claude") -> int:
-    """Record the vault-baseline hash of every mountable file in `categories`,
+    """Record the mount baseline of every mountable file in `categories`,
     merging over any existing manifest (categories not mounted this time keep
     their old entries). detect_overrides uses this to tell 'the project never
     touched it' (vault staleness -> refresh on next mount) from 'the project
-    edited it' (real override -> preserve). Returns entries written."""
+    edited it' (real override -> preserve). Returns entries written.
+
+    The recorded hash is the hash of the file AS MOUNTED — i.e. the vault file
+    rendered for `platform` (identity for claude). Recording the raw vault hash
+    made every non-Claude mounted file look edited."""
     manifest = load_mount_manifest(project, platform)
     count = 0
     for cat in categories:
@@ -267,13 +544,15 @@ def write_mount_manifest(project: Path, vault: Path,
         for p in sorted(src.rglob("*.md")):
             if p.name.endswith(".append.md") or p.name.startswith("._"):
                 continue
-            key = (Path(cat) / p.relative_to(src)).as_posix()
-            manifest[key] = _file_hash(p)
+            rel = p.relative_to(src)
+            key = (Path(cat) / rel).as_posix()
+            manifest[key] = _render_hash(p.read_bytes(), platform, vault, cat, rel)
             count += 1
-    p_name = f".{platform}" if not platform.startswith(".") else platform
+    p_name = platform_dirname(platform)
     out = project / p_name / MOUNT_MANIFEST_NAME
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"suite_version": suite_version(vault),
+                               "platform": platform_key(platform),
                                "files": manifest}, indent=1, sort_keys=True) + "\n",
                    encoding="utf-8")
     return count
@@ -292,12 +571,17 @@ def _normalize_legacy_format(data: bytes) -> bytes:
 
 
 def _matches_vault_history(vault: Path, rel: str, file_hash: str,
-                           norm_hash: str | None = None) -> bool:
-    """Legacy-fallback staleness test (projects mounted before the manifest
-    existed): True if `file_hash` equals ANY committed vault version of `rel`,
-    byte-for-byte or after legacy wikilink normalization on both sides (old
-    mounts rewrote [[x]] -> `x` while copying, e.g. guai's review-migrations.md
-    2026-07). A historical match proves the project never edited the file."""
+                           norm_hash: str | None = None,
+                           platform: str = "claude",
+                           cat: str | None = None,
+                           vault_rel: "Path | None" = None) -> bool:
+    """Staleness test: True if `file_hash` equals ANY committed vault version of
+    `rel` — byte-for-byte, after legacy wikilink normalization on both sides
+    (old mounts rewrote [[x]] -> `x` while copying, e.g. guai's
+    review-migrations.md 2026-07), or after rendering that historical version
+    for `platform` (a project mounted for Antigravity/Codex before a vault edit
+    holds the OLD render, which matches no current baseline). A historical match
+    proves the project never edited the file — it is stale, not tuned."""
     try:
         commits = subprocess.run(
             ["git", "log", "--format=%H", "--", rel],
@@ -305,6 +589,7 @@ def _matches_vault_history(vault: Path, rel: str, file_hash: str,
         ).stdout.split()
     except OSError:
         return False
+    non_claude = platform_key(platform) != "claude"
     for c in commits:
         r = subprocess.run(["git", "show", f"{c}:{rel}"],
                            capture_output=True, cwd=vault, check=False)
@@ -314,6 +599,9 @@ def _matches_vault_history(vault: Path, rel: str, file_hash: str,
             return True
         if norm_hash is not None and hashlib.sha256(
                 _normalize_legacy_format(r.stdout)).hexdigest() == norm_hash:
+            return True
+        if non_claude and _render_hash(r.stdout, platform, vault,
+                                       cat, vault_rel) == file_hash:
             return True
     return False
 
@@ -328,13 +616,40 @@ def _skill_dir_canonical(cat: str, rel: Path) -> "Path | None":
     return None
 
 
+CODEX_COMMAND_MARKER = b"<!-- kuraka-codex-command-skill -->"
+
+_CODEX_ENTRYPOINT_RE = re.compile(
+    rb"\n*<!-- kuraka-codex-entrypoint:start -->.*?"
+    rb"<!-- kuraka-codex-entrypoint:end -->\n*", re.S)
+
+
+def _strip_codex_entrypoint(data: bytes) -> bytes:
+    """Drop the '## Codex explicit invocation' block kuraka-export appends to a
+    mounted Codex skill. It is a mount artifact layered on top of the skill
+    projection, so it must not make the file look edited by the project."""
+    return _CODEX_ENTRYPOINT_RE.sub(b"\n", data)
+
+
+def _is_codex_command_skill(platform: str, cat: str, rel: Path,
+                            data: bytes, vault: Path) -> bool:
+    """True for .codex/skills/<n>/SKILL.md that kuraka-export generated from the
+    vault COMMAND <n>.md. It has no `skills/` baseline (it is a cross-category
+    projection owned by the export), so without this it reads as a custom file.
+    The export stamps every one of them with CODEX_COMMAND_MARKER."""
+    return (platform_key(platform) == "codex" and cat == "skills"
+            and rel.name == "SKILL.md" and len(rel.parts) == 2
+            and CODEX_COMMAND_MARKER in data
+            and (vault / "commands" / f"{rel.parts[0]}.md").is_file())
+
+
 def detect_overrides(project: Path, vault: Path, platform: str = "claude") -> list[Path]:
     """Relative paths (as `<cat>/<rel>`) under platform/<cat>/ whose content differs
     from the vault baseline, or that don't exist in the vault at all (custom
     files). These are the project-specific tunings worth preserving."""
     out: list[Path] = []
     manifest = load_mount_manifest(project, platform)
-    p_name = f".{platform}" if not platform.startswith(".") else platform
+    p_name = platform_dirname(platform)
+    non_claude = platform_key(platform) != "claude"
     for cat in OVERRIDE_CATEGORIES:
         proj_cat = project / p_name / cat
         vault_cat = vault / cat
@@ -345,32 +660,100 @@ def detect_overrides(project: Path, vault: Path, platform: str = "claude") -> li
                 continue  # ._* = macOS AppleDouble metadata, never an override
             rel = p.relative_to(proj_cat)
             canon = _skill_dir_canonical(cat, rel)
-            base = vault_cat / (canon or rel)
-            proj_hash = _file_hash(p)
-            if base.exists() and proj_hash == _file_hash(base):
-                continue  # identical to current vault
-            key = (Path(cat) / (canon or rel)).as_posix()
-            if key in manifest and proj_hash == manifest[key]:
+            # A project skills/<n>/SKILL.md may come from EITHER the vault's
+            # directory skill (skills/<n>/SKILL.md) or the flat transition copy
+            # (skills/<n>.md) — the mount writes both shapes. Accept any of them
+            # as the baseline, or dir-only skills (sentry-triage) read as custom.
+            candidates = [r for r in (rel, canon) if r and (vault_cat / r).is_file()]
+            proj_bytes = p.read_bytes()
+            proj_hash = hashlib.sha256(proj_bytes).hexdigest()
+            # A mounted file may carry export-appended blocks on top of the
+            # projection; compare against those variants too.
+            proj_hashes = {proj_hash}
+            if platform_key(platform) == "codex":
+                stripped = _strip_codex_entrypoint(proj_bytes)
+                if stripped != proj_bytes:
+                    proj_hashes.add(hashlib.sha256(stripped).hexdigest())
+            matched = False
+            for vr in candidates:
+                base_bytes = (vault_cat / vr).read_bytes()
+                if hashlib.sha256(base_bytes).hexdigest() in proj_hashes:
+                    matched = True  # identical to current vault (claude render)
+                    break
+                if non_claude and _render_hash(
+                        base_bytes, platform, vault, cat, vr) in proj_hashes:
+                    matched = True  # identical to this platform's current render
+                    break
+            if matched:
+                continue
+            if _is_codex_command_skill(platform, cat, rel, proj_bytes, vault):
+                continue  # mount artifact: a vault COMMAND published as a Codex
+                          # skill by kuraka-export, not a project tuning
+            base_rel = candidates[0] if candidates else (canon or rel)
+            base = vault_cat / base_rel
+            key = (Path(cat) / base_rel).as_posix()
+            if key in manifest and manifest[key] in proj_hashes:
                 continue  # untouched since mount
-            if key not in manifest and base.exists():
+            if base.exists():
+                # Not the current vault and not the mount baseline: it may still
+                # be an untouched copy of an OLDER vault version (stale, refresh
+                # on next mount) rather than a real tuning. Ask git history.
                 norm_hash = hashlib.sha256(
-                    _normalize_legacy_format(p.read_bytes())).hexdigest()
-                if _matches_vault_history(vault, key, proj_hash, norm_hash):
+                    _normalize_legacy_format(proj_bytes)).hexdigest()
+                if _matches_vault_history(vault, key, proj_hash, norm_hash,
+                                          platform=platform, cat=cat,
+                                          vault_rel=base_rel):
                     continue
             out.append(Path(cat) / rel)
     return out
 
 
+def migrate_legacy_overrides(vault: Path, slug: str) -> str | None:
+    """Move a pre-platform-split store (overrides/<cat>/…) into
+    overrides/<platform>/<cat>/…. The platform is read from the old MANIFEST.md
+    header ('snapshotted from .agents/'), defaulting to claude. Returns the
+    platform it migrated into, or None when there was nothing to migrate."""
+    root = overrides_root(vault, slug)
+    legacy_cats = [c for c in OVERRIDE_CATEGORIES if (root / c).is_dir()]
+    if not legacy_cats:
+        return None
+    plat = "claude"
+    old_manifest = root / "MANIFEST.md"
+    if old_manifest.is_file():
+        head = old_manifest.read_text(encoding="utf-8", errors="ignore")[:400]
+        m = re.search(r"snapshotted from \.([A-Za-z0-9_-]+)/", head)
+        if m:
+            plat = platform_key(m.group(1))
+    # Stage in a sibling first: the platform folder may share a name with one of
+    # the category folders being moved (a move into one's own subtree fails).
+    staging = root.parent / f"{root.name}.migrating"
+    if staging.exists():
+        shutil.rmtree(staging)
+    staging.mkdir(parents=True)
+    for c in legacy_cats:
+        shutil.move(str(root / c), str(staging / c))
+    if old_manifest.is_file():
+        shutil.move(str(old_manifest), str(staging / "MANIFEST.md"))
+    dst = overrides_dir(vault, slug, plat)
+    if dst.exists():
+        shutil.rmtree(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(staging), str(dst))
+    return plat
+
+
 def snapshot_overrides(project: Path, vault: Path, slug: str, platform: str = "claude") -> int:
     """Copy divergent agent/skill/command files into the central overrides store,
-    preserving <cat>/<rel>, and rewrite MANIFEST.md."""
-    dst_root = overrides_dir(vault, slug)
+    preserving <cat>/<rel>, and rewrite MANIFEST.md. Scoped to `platform`: a
+    snapshot of one platform never clears another platform's store."""
+    migrate_legacy_overrides(vault, slug)
+    dst_root = overrides_dir(vault, slug, platform)
     rels = detect_overrides(project, vault, platform)
     if dst_root.exists():
         shutil.rmtree(dst_root)
     if not rels:
         return 0
-    p_name = f".{platform}" if not platform.startswith(".") else platform
+    p_name = platform_dirname(platform)
     lines = [
         f"# Overrides — project-specific tunings snapshotted from {p_name}/",
         "",
@@ -393,12 +776,17 @@ def snapshot_overrides(project: Path, vault: Path, slug: str, platform: str = "c
 
 
 def restore_overrides(vault: Path, slug: str, project: Path, platform: str = "claude") -> int:
-    """Re-apply snapshotted overrides on top of freshly-mounted vault copy."""
-    src_root = overrides_dir(vault, slug)
+    """Re-apply snapshotted overrides on top of freshly-mounted vault copy.
+
+    Reads ONLY this platform's store — pasting an Antigravity render into a
+    Claude mount (or vice versa) would strip the harness frontmatter and rewrite
+    the paths of a whole agent suite."""
+    migrate_legacy_overrides(vault, slug)
+    src_root = overrides_dir(vault, slug, platform)
     if not src_root.is_dir():
         return 0
     copied = 0
-    p_name = f".{platform}" if not platform.startswith(".") else platform
+    p_name = platform_dirname(platform)
     for cat in OVERRIDE_CATEGORIES:
         src_cat = src_root / cat
         if not src_cat.is_dir():
@@ -411,7 +799,7 @@ def restore_overrides(vault: Path, slug: str, project: Path, platform: str = "cl
             d.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(s, d)
             copied += 1
-    if platform == "claude":
+    if platform_key(platform) == "claude":
         copied += _mirror_claude_skill_copies(project / p_name / "skills")
     return copied
 
@@ -473,6 +861,100 @@ def _retro_dirs(project: Path, docs_root: str) -> list[Path]:
     return [d for d in candidates if d.is_dir()]
 
 
+TELEMETRY_SUFFIX = "-telemetry.json"
+_MIN_TELEMETRY_STEM = 12  # a bare "REQ-1" must never match half the cycles
+
+
+def _telemetry_stem(name: str) -> str:
+    """The REQ a telemetry filename refers to. Both shapes seen in the wild:
+    `<REQ>-telemetry.json` (the convention) and `<REQ>.json` (adela) — inside
+    docs/process/agent-telemetry/ a .json IS telemetry, by location."""
+    if name.endswith(TELEMETRY_SUFFIX):
+        return name[:-len(TELEMETRY_SUFFIX)]
+    return name[:-len(".json")]
+
+
+def _find_telemetry(req: str, telem_dirs: list[Path], retro: Path) -> "Path | None":
+    """The telemetry JSON for a cycle, wherever the project keeps it.
+
+    Exact match on either filename shape first. Then a RELAXED match on the REQ
+    prefix: projects routinely name the telemetry with the short REQ id while the
+    RETRO carries the full slug (petsuite: `REQ-20260813-REQ-011-telemetry.json`
+    vs `RETRO-REQ-20260813-REQ-011-slot-duration-overlap-prevention.md`), which
+    left 7 of its 14 telemetry files unattached. Only accepted when the stem ends
+    on a `-` boundary of the REQ and exactly ONE file matches — never a guess."""
+    dirs = list(telem_dirs) + [retro.parent.parent / "agent-telemetry"]
+    for d in dirs:
+        for exact in (d / f"{req}{TELEMETRY_SUFFIX}", d / f"{req}.json"):
+            if exact.exists():
+                return exact
+    matches: dict[str, Path] = {}
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for f in d.glob("*.json"):
+            stem = _telemetry_stem(f.name)
+            if (len(stem) >= _MIN_TELEMETRY_STEM and req.startswith(stem)
+                    and req[len(stem):len(stem) + 1] == "-"):
+                matches[f.name] = f
+    return next(iter(matches.values())) if len(matches) == 1 else None
+
+
+def _attach_late_telemetry(dest: Path, req: str, telem_dirs: list[Path],
+                           retro: Path) -> bool:
+    """Add the telemetry to an ALREADY archived cycle that lacks it, and fix its
+    meta.yaml. Returns True if something was attached."""
+    if any(dest.glob("*-telemetry.json")):
+        return False
+    telem = _find_telemetry(req, telem_dirs, retro)
+    if telem is None:
+        return False
+    shutil.copy2(telem, dest / telem.name)
+    meta = dest / "meta.yaml"
+    if meta.is_file():
+        text = meta.read_text(encoding="utf-8", errors="ignore")
+        meta.write_text(text.replace("has_telemetry: false", "has_telemetry: true"),
+                        encoding="utf-8")
+    return True
+
+
+def latest_cycle(vault: Path, slug: str) -> "str | None":
+    """The most recently archived cycle of a project (by `archived_at`).
+
+    The scope of every "is this cycle complete?" check: it is the one still
+    fixable. The historical pile is reported, never blocked on."""
+    root = cycles_dir(vault, slug)
+    if not root.is_dir():
+        return None
+    dated: list[tuple[str, str]] = []
+    for d in root.iterdir():
+        meta = d / "meta.yaml"
+        if not d.is_dir() or not meta.is_file():
+            continue
+        m = re.search(r"^archived_at:\s*(\S+)", meta.read_text(encoding="utf-8",
+                                                               errors="ignore"), re.M)
+        dated.append((m.group(1) if m else "", d.name))
+    return max(dated)[1] if dated else None
+
+
+def _refresh_verdict(dest: Path, retro: Path) -> bool:
+    """Fill in an archived cycle's empty verdict once the RETRO gains its
+    `## Confidence:` line. Same reasoning as the late telemetry: the cycle was
+    archived before the file was complete, and a plain skip froze it empty
+    forever — invisible to INDEX.md and to `pattern-detector`."""
+    meta = dest / "meta.yaml"
+    if not meta.is_file():
+        return False
+    text = meta.read_text(encoding="utf-8", errors="ignore")
+    if 'verdict: ""' not in text:
+        return False
+    verdict = find_verdict(retro.read_text(encoding="utf-8", errors="ignore"))
+    if not verdict:
+        return False
+    meta.write_text(text.replace('verdict: ""', f'verdict: "{verdict}"'), encoding="utf-8")
+    return True
+
+
 def archive_cycles(project: Path, vault: Path, slug: str, branch: str,
                    docs_root: str, force: bool) -> list[dict]:
     """Copy each cycle's RETRO (+ telemetry) into <vault>/projects/<slug>/cycles/<REQ>/.
@@ -495,14 +977,20 @@ def archive_cycles(project: Path, vault: Path, slug: str, branch: str,
         req = retro.stem[len("RETRO-"):] if retro.stem.startswith("RETRO-") else retro.stem
         dest = dest_root / req
         if dest.exists() and not force:
-            rows.append({"req": req, "status": "skip"})
+            # Already archived — but telemetry is usually written AFTER the RETRO
+            # (the final-auditor closes the cycle, the dashboard aggregates later),
+            # and the plain skip meant a cycle archived telemetry-less stayed that
+            # way forever unless someone ran --force. Attach it if it showed up.
+            added = _attach_late_telemetry(dest, req, telem_dirs, retro)
+            fixed = _refresh_verdict(dest, retro)
+            rows.append({"req": req, "status": "skip",
+                         **({"telem_added": True} if added else {}),
+                         **({"verdict_added": True} if fixed else {})})
             continue
         dest.mkdir(parents=True, exist_ok=True)
         retro_text = retro.read_text(encoding="utf-8", errors="ignore")
         shutil.copy2(retro, dest / retro.name)
-        telem_candidates = [d / f"{req}-telemetry.json" for d in telem_dirs]
-        telem_candidates.append(retro.parent.parent / "agent-telemetry" / f"{req}-telemetry.json")
-        telem = next((t for t in telem_candidates if t.exists()), None)
+        telem = _find_telemetry(req, telem_dirs, retro)
         if telem:
             shutil.copy2(telem, dest / telem.name)
         verdict = find_verdict(retro_text)

@@ -16,7 +16,8 @@ Central layout (single directory per project):
         layer/        ← <platform-layer>/**          (specialization layer)
         state/        ← docs/process/**              (in-flight Kuraka artifacts)
         cycles/<REQ>/ ← RETRO + telemetry + meta     (closed-cycle diagnostics)
-        backup.yaml   ← last_backup, last_branch, branches[]
+        overrides/<platform>/<cat>/ ← project agent/skill/command tuning
+        backup.yaml   ← last_backup, last_overrides, last_branch, branches[]
 
 Usage:
     python3 kuraka-backup.py /path/to/project [--name slug] [--layer-root .codex/project] [--cycles-only] [--force]
@@ -39,24 +40,39 @@ def err(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
-def update_backup_sidecar(vault: Path, slug: str, branch: str, today: str) -> None:
-    """Track which branches this project has been backed up from (accumulative)."""
+def update_backup_sidecar(vault: Path, slug: str, branch: str, today: str,
+                          overrides_only: bool = False,
+                          overrides_done: bool = True) -> None:
+    """Track which branches this project has been backed up from (accumulative).
+
+    A `--overrides-only` run (the mount pre-flight) does NOT move `last_backup`
+    — that date means "full state snapshotted at cycle close". It records
+    `last_overrides` instead, so a store can be told 'mounted recently, never
+    fully backed up' from 'stale'."""
     side = kc.project_dir(vault, slug) / "backup.yaml"
     branches: list[str] = []
+    prev: dict[str, str] = {}
     if side.exists():
         for line in side.read_text(encoding="utf-8", errors="ignore").splitlines():
             m = line.strip()
             if m.startswith("- "):
                 branches.append(m[2:].strip())
+            elif ":" in m and not m.endswith(":"):
+                k, v = m.split(":", 1)
+                prev[k.strip()] = v.strip()
     if branch and branch not in branches:
         branches.append(branch)
+    last_backup = prev.get("last_backup", "—") if overrides_only else today
+    last_branch = prev.get("last_branch", branch) if overrides_only else branch
     lines = [
         f"project: {slug}",
-        f"last_backup: {today}",
-        f"last_branch: {branch}",
+        f"last_backup: {last_backup}",
+        f"last_branch: {last_branch}",
+        f"last_overrides: {today if overrides_done else prev.get('last_overrides', '—')}",
         "branches:",
     ]
     lines += [f"  - {b}" for b in branches] or ["  []"]
+    side.parent.mkdir(parents=True, exist_ok=True)
     side.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -76,6 +92,10 @@ def main() -> int:
     ap.add_argument("--skip-overrides", action="store_true",
                     help="do not snapshot platform overrides (used by Codex projection)")
     ap.add_argument("--force", action="store_true", help="re-copy cycles already present")
+    ap.add_argument("--allow-incomplete-retro", action="store_true",
+                    help="archive a cycle whose RETRO has no `## Confidence:` line "
+                         "(deliberate exception; the cycle stays unusable for "
+                         "cross-project comparison)")
     args = ap.parse_args()
 
     try:
@@ -100,20 +120,26 @@ def main() -> int:
     branch = kc.git_branch(project)
     today = date.today().isoformat()
 
-    platform = args.platform
-    if not platform:
-        if args.target == "antigravity" or (project / ".agents").is_dir():
-            platform = "agents"
-        elif args.target == "codex" or (project / ".codex").is_dir():
-            platform = "codex"
-        elif args.target == "cursor" or (project / ".cursor").is_dir():
-            platform = "cursor"
-        else:
-            platform = "claude"
+    # Guard against a silent store split: this directory may already own an entry
+    # under another slug (the config's project.name was edited, or `amauta` wrote
+    # a different one). Backing up under the new slug would strand the existing
+    # history. The registered slug wins unless --name says otherwise.
+    registered = kc.registered_slug_for_path(vault, project)
+    if registered and registered != slug and not args.name:
+        err(f"⚠️  este proyecto ya está registrado como «{registered}», pero "
+            f"kuraka.config.yaml dice «{slug}».")
+        err(f"   Uso «{registered}» para no partir su historia "
+            f"({kc.project_dir(vault, registered)}).")
+        err(f"   Si el rename es intencional: cambiá `path:` en el registry y corré")
+        err(f"     python3 kuraka-merge-project.py {registered} {slug}")
+        err("")
+        slug = registered
+
+    platform = kc.detect_platform(project, args.target, args.platform)
 
     layer_root = args.layer_root
     if layer_root == ".claude/project":
-        p_dir = f".{platform}" if not platform.startswith(".") else platform
+        p_dir = kc.platform_dirname(platform)
         if (project / p_dir / "project").is_dir() or platform != "claude":
             layer_root = f"{p_dir}/project"
 
@@ -129,8 +155,13 @@ def main() -> int:
             print("   overrides/ omitidos para esta proyección de plataforma")
             return 0
         n_ov = kc.snapshot_overrides(project, vault, slug, platform=platform)
-        p_name = f".{platform}" if not platform.startswith(".") else platform
-        print(f"   overrides/ ← {p_name}/{{agents,skills,commands}}   ({n_ov} archivo(s) divergente(s))")
+        p_name = kc.platform_dirname(platform)
+        print(f"   overrides/{kc.store_platform(platform)}/ ← {p_name}/{{agents,skills,commands}}"
+              f"   ({n_ov} archivo(s) divergente(s))")
+        # Only for a REGISTERED project: a pre-flight on a throwaway/unregistered
+        # target must leave no trace in projects/.
+        if kc.registry_note(vault, slug).is_file():
+            update_backup_sidecar(vault, slug, branch, today, overrides_only=True)
         print("")
         print(f"✅ overrides de {slug} respaldados.")
         return 0
@@ -156,12 +187,57 @@ def main() -> int:
         print("   overrides/ omitidos para esta proyección de plataforma")
     else:
         n_ov = kc.snapshot_overrides(project, vault, slug, platform=platform)
-        p_name = f".{platform}" if not platform.startswith(".") else platform
-        print(f"   overrides/ ← {p_name}/{{agents,skills,commands}}   ({n_ov} archivo(s) divergente(s))")
+        p_name = kc.platform_dirname(platform)
+        print(f"   overrides/{kc.store_platform(platform)}/ ← {p_name}/{{agents,skills,commands}}"
+              f"   ({n_ov} archivo(s) divergente(s))")
 
 
-    update_backup_sidecar(vault, slug, branch, today)
+    update_backup_sidecar(vault, slug, branch, today,
+                          overrides_done=not args.skip_overrides)
     print("")
+
+    # Cycle-close contract, enforced HERE because this is the only gate every
+    # platform runs. Hooks are Claude-only; on Antigravity/Cursor/Codex the
+    # framework relied on prose, and prose alone produced whole projects of
+    # verdict-less cycles (camisassis: 16 of 16) — archived, but invisible to
+    # pattern-detector and to any cross-project comparison. Phase 7's hard exit
+    # criterion is already "kuraka-backup exits 0", so refusing here turns the
+    # rule into a deterministic gate on every editor, with no hook API needed.
+    # Scope: what this run archived, PLUS the most recent cycle in the store —
+    # otherwise simply re-running the backup without fixing anything would pass
+    # (the second time the cycle is "already archived" and gets skipped).
+    # The older pile is left to kuraka-doctor to report, never to block on.
+    def _meta(req: str) -> str:
+        m = kc.cycles_dir(vault, slug) / req / "meta.yaml"
+        return m.read_text(encoding="utf-8", errors="ignore") if m.is_file() else ""
+
+    to_check = {r["req"] for r in rows if r["status"] == "archived"}
+    latest = kc.latest_cycle(vault, slug)
+    if latest:
+        to_check.add(latest)
+    no_verdict = sorted(r for r in to_check if 'verdict: ""' in _meta(r))
+    no_telem = sorted(r for r in to_check if "has_telemetry: false" in _meta(r))
+    if no_telem:
+        err(f"⚠️  {len(no_telem)} ciclo(s) archivados SIN telemetría: "
+            f"{', '.join(no_telem[:3])}"
+            + (" …" if len(no_telem) > 3 else ""))
+        err(f"   escribí `<REQ>-telemetry.json` en {args.docs_root}/agent-telemetry/ "
+            f"(métricas no disponibles = `null`/`unknown`, nunca 0) y re-corré este backup.")
+        err("")
+    if no_verdict and not args.allow_incomplete_retro:
+        err(f"❌ el estado se respaldó, pero el ciclo NO cierra: "
+            f"{len(no_verdict)} RETRO sin la línea de veredicto.")
+        for req in no_verdict[:5]:
+            err(f"   · {req}")
+        err("")
+        err("   Agregá como ÚLTIMA línea de cada RETRO:")
+        err("       ## Confidence: HIGH | MEDIUM | LOW")
+        err("   La parsea find_verdict hacia cycles/<REQ>/meta.yaml y hacia")
+        err("   projects/INDEX.md — sin ella el ciclo no cuenta para pattern-detector.")
+        err("   Después re-corré este backup (el meta se rellena solo).")
+        err("   Excepción deliberada: --allow-incomplete-retro")
+        return 1
+
     print(f"✅ backup completo de {slug} (rama {branch}).")
     return 0
 

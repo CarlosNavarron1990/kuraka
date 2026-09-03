@@ -1,5 +1,5 @@
 ---
-description: "VAULT-ONLY. Harvest the adjustments consumer projects made to their mounted agents (projects/<slug>/overrides/), classify them (stale copy / project tuning / core candidate), detect custom agents worth adopting, PROPOSE integrations to the user (never auto-apply), and manage the suite version bump + changelog. Run it each time you open the vault to continuously improve the agent suite."
+description: "VAULT-ONLY. Harvest the adjustments consumer projects made to their mounted agents (projects/<slug>/overrides/<platform>/), classify them (stale copy / project tuning / core candidate), detect custom agents worth adopting, PROPOSE integrations to the user (never auto-apply), and manage the suite version bump + changelog. Run it each time you open the vault to continuously improve the agent suite."
 ---
 
 # Task: Harvest project feedback into the core agent suite
@@ -46,10 +46,16 @@ candidates, instructing each to check the current vault text before proposing
 (vault agents cite integrated lessons inline — e.g. "(clinica-dental: …)",
 "(kuraka-control S5c)" — substance already present = ALREADY-INTEGRATED).
 
-**Channel B — whole-file overrides** (`projects/<slug>/overrides/`):
+**Channel B — whole-file overrides** (`projects/<slug>/overrides/<platform>/`):
 
-1. Read `MANIFEST.md` (snapshot date, file list).
+The store is scoped per platform (`claude` / `antigravity` / `codex` / `cursor`),
+because the same project can be mounted for several at once.
+
+1. Read `<platform>/MANIFEST.md` (snapshot date, platform, file list).
 2. For each `<cat>/<file>`, diff against the vault baseline (`<vault>/<cat>/<file>`).
+   For a NON-Claude platform the mounted file is a RENDER of the vault (Claude-only
+   frontmatter subtracted, discipline prose re-expanded, paths projected), so judge
+   the SUBSTANCE, never the frontmatter/path differences the render itself creates.
 3. A file with **no vault baseline** is a **custom agent/skill/command** → Step 4.
 
 ## Step 3 — Classify every divergence (the core judgment)

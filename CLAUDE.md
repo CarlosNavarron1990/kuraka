@@ -26,9 +26,25 @@ python3 kuraka-init.py --target /path --name foo --yes --no-mount
 python3 kuraka-init.py --target /path --register-only --yes   # only upsert the registry note
 
 # Discover ALL Kuraka-mounted projects on disk and reconcile the registry (both ways:
-# mounted-but-unregistered, and registered-but-not-mounted). mount-kuraka.sh now also
-# auto-registers, so new mounts never drift. Read-only without --register.
+# mounted-but-unregistered, and registered-but-not-mounted; it detects a mount on ANY
+# platform, not just .claude/). mount-kuraka.sh now also auto-registers, so new mounts
+# never drift. Read-only without --register. It ALSO flags a "store partido": one
+# directory registered under two slugs — see kuraka-merge-project.py below.
 python3 kuraka-discover.py [--register] [--roots ~/Desarrollos,~/work]
+
+# NOTE — slug drift guard: `project_slug` reads kuraka.config.yaml `project.name`, so
+# editing that name (or letting `amauta` write a different one) would start a SECOND
+# store for the same directory. `kuraka_common.registered_slug_for_path` detects it:
+# kuraka-backup and the registry upsert keep the REGISTERED slug and print the merge
+# command instead of splitting the history (guai-home-marketplace, 62 ciclos, vs the
+# `guaihome-marketplace` its config was given). `--name` still overrides explicitly.
+
+# Fuse two central-store entries of the SAME project. The store is keyed by slug
+# (kuraka.config.yaml project.name, else the folder name), so RENAMING a solution
+# splits its history across two entries. Target wins on a content conflict; the old
+# name is recorded as an `aliases:` entry + a "Historial de nombres" note; INDEX.md
+# rows are re-pointed; the source entry is deleted last. Always --dry-run first.
+python3 kuraka-merge-project.py <slug-viejo> <slug-actual> [--dry-run] [--yes]
 
 # Mount the vault into a consumer project (copies agents/skills/rules/artifacts into
 # .claude/ and updates .gitignore of the target). Always run in the target repo root.
@@ -40,9 +56,30 @@ python3 kuraka-discover.py [--register] [--roots ~/Desarrollos,~/work]
 python3 kuraka-mount.py [target_dir]                  # cross-platform (Windows too)
 # On a TTY it shows a banner + a small menu (which categories to mount / status-only)
 # and a live MCP-component detection block; piped/agent runs mount everything silently.
-# It also (a) snapshots any local agent tuning BEFORE the rsync and (b) re-applies
-# project overrides AFTER it (see "Project-specific overrides" below).
+# It also (a) snapshots any local agent tuning BEFORE the rsync, (b) re-applies
+# project overrides AFTER it (see "Project-specific overrides" below), and (c) drafts
+# the ADOPTION ARTIFACTS if they are missing — kuraka.config.yaml + the platform's
+# project/ layer skeleton, via `kuraka-init.py --adopt` (never overwrites). Until
+# 2026-08 the mount only PRINTED how to create them, so any project adopted straight
+# with mount-kuraka ran with no config: the agents lost the canonical docs_process_root
+# and scattered their output (guai: retros split across docs/process/retros/ AND
+# agent-retrospectives/, 36 duplicated). The draft is a floor — refine it with `amauta`.
 bash mount-kuraka.sh [target_dir]            # default target is $PWD
+
+# Draft ONLY the adoption artifacts for an already-mounted project (what the mount
+# now calls). Non-interactive, never overwrites, never mounts, never registers.
+python3 kuraka-init.py --target /path --adopt [--layer-root .agents/project] --yes
+
+# Health check of a project's Kuraka STATE (not its exit codes): config + slug
+# agreement, layer, mount manifest/suite, local agent tuning in sync with the store,
+# RETROs archived, telemetry attached, docs/process mirrored. Exit 0 healthy, 1 findings.
+# --fix applies only the safe repairs (adopt/register/overrides/backup) and re-checks;
+# a missing manifest deliberately requires `--update` (regenerating it from the current
+# files would freeze a real project tuning as the baseline) and a slug mismatch is never
+# auto-rewritten. Wired into the lifecycle: SessionStart hook, cycle preflight
+# (skills/kuraka.md §Prerequisites), Phase 7 gate, and the tail of every mount.
+python3 kuraka-doctor.py [project] [--fix]
+python3 kuraka-doctor.py --all [--brief]     # every registered project
 
 # Validate frontmatter + registration readiness of a mounted .claude/
 bash validate-kuraka.sh [target_dir]         # exit 1 if any agent/skill FM is invalid
@@ -59,6 +96,12 @@ python3 aggregate-telemetry.py [project_root]  # writes docs/process/agent-telem
 # command files that diverge from the vault baseline — project-specific tuning). Run at
 # Phase 7 (the final-auditor calls it). Idempotent. Feeds cross-project pattern-detection
 # AND preserves Kuraka work outside the solution's git.
+# Cierre de ciclo: desde 2026-09 SALE 1 si el RETRO recién archivado (o el último
+# ciclo del store) no tiene su línea `## Confidence:` — el estado se respalda igual,
+# lo que no cierra es el CICLO. Vive en el script y no en un hook a propósito: los
+# hooks son Claude-only y en Antigravity/Cursor/Codex la prosa sola dejó proyectos
+# enteros de ciclos sin veredicto. Telemetría ausente = warning, no bloqueo.
+# Excepción deliberada: --allow-incomplete-retro
 python3 kuraka-backup.py [project_root]                 # layer+state+cycles+overrides
 python3 kuraka-backup.py [project_root] --overrides-only  # only re-snapshot overrides (mount pre-flight)
 python3 kuraka-archive.py [project_root]                # cycles-only (backward-compat wrapper)
@@ -88,7 +131,7 @@ be grouped per suite version to compare rework across versions.
 
 `/kuraka-harvest` (vault-only command, `commands/kuraka-harvest.md`, symlinked into
 `.claude/commands/` so it's invocable here; in `EXPORT_SKIP`) is the improvement
-loop: run it when opening the vault. It collects `projects/*/overrides/`, classifies
+loop: run it when opening the vault. It collects `projects/*/overrides/<platform>/`, classifies
 each divergence (stale vault copy / project tuning / core candidate), detects
 custom agents worth adopting, **proposes** integrations (user approves per item —
 NEVER auto-apply agent changes), then applies + bumps the version + updates the
@@ -132,23 +175,44 @@ by the vault rsync on every mount, so the tuning would otherwise be lost. The ov
 subsystem preserves it, centrally, with zero change to how you tune (keep editing the
 files directly):
 
-- **Detect** (`kuraka_common.detect_overrides`): a `.claude/{agents,skills,commands}/*.md`
-  file is an override if it diverges byte-for-byte from its vault baseline (or has no
-  baseline = custom). `*.append.md` fragments are excluded. **Staleness is NOT an
-  override**: `kuraka-mount.py` writes `.claude/.kuraka-mount-manifest.json` (vault
-  baseline hash per mounted file); a file that differs from the current vault but still
-  matches its mount-time baseline was never touched by the project — it is skipped so
-  the next mount refreshes it. Legacy projects without a manifest get a git-history
-  fallback (`_matches_vault_history`): divergent-but-matching-a-committed-vault-version
-  = stale, skipped. (Without this, a stale project pinned itself to an old framework
-  forever: kuraka-control 2026-07 had 27 June files snapshotted as "overrides".)
+- **Detect** (`kuraka_common.detect_overrides`): a `<platform>/{agents,skills,commands}/*.md`
+  file is an override if it diverges from its vault baseline (or has no baseline =
+  custom). `*.append.md` fragments are excluded. **The baseline is the file AS MOUNTED,
+  not the vault file**: Claude mounts are byte-identical copies, every other platform
+  gets a render (`kuraka_common.render_for_platform` — Claude-only frontmatter subtracted,
+  discipline re-expanded, paths projected; plus `render_vault_content` for the Codex
+  skill projection). `kuraka-mount.copy_file` and `write_mount_manifest` call the SAME
+  function, so `.claude/.kuraka-mount-manifest.json` is a valid baseline on every
+  platform. (It used to store the raw vault hash, so on Antigravity/Codex the whole
+  mounted suite read as "project tuning" — petsuite 104 files, camisassis 153 — and the
+  project froze on an old framework version. Fixed 2026-08-29.)
+- **Staleness is NOT an override**: a file that differs from the current vault but
+  matches its mount-time baseline was never touched — it is skipped so the next mount
+  refreshes it. Legacy mounts without a manifest get a git-history fallback
+  (`_matches_vault_history`, which renders each historical version for the platform):
+  divergent-but-matching-a-committed-vault-version = stale, skipped. (Without this, a
+  stale project pinned itself to an old framework forever: kuraka-control 2026-07 had
+  27 June files snapshotted as "overrides".) Mount artifacts that are not copies —
+  the Codex command-published-as-skill, the appended `kuraka-codex-entrypoint` block —
+  are recognised and skipped too.
 - **Snapshot** (`kuraka-backup.py`, also `--overrides-only`): copies divergent files to
-  `projects/<slug>/overrides/<cat>/<file>` + a `MANIFEST.md`. If nothing diverges it
-  **clears** the store subdir, so a reverted tuning disappears (no orphan re-applied later).
+  `projects/<slug>/overrides/<platform>/<cat>/<file>` + a `MANIFEST.md`. The store is
+  **per platform** (`claude` / `antigravity` / `codex` / `cursor`) because a project can
+  be mounted for several at once (PetSuite has `.claude/` AND `.agents/`); a flat store
+  let the last snapshot win and let a restore paste one platform's render into another
+  platform's mount. A legacy flat store migrates automatically on first touch. If nothing
+  diverges the platform's subdir is **cleared**, so a reverted tuning disappears (no
+  orphan re-applied later).
 - **Re-apply** (`kuraka-restore.py --overrides-only`): overwrites the fresh vault copy
-  with the stored overrides — the project override always wins. `mount-kuraka.sh` runs
-  this on EVERY mount (TTY or not), and also snapshots pre-rsync so an un-backed-up tuning
-  is captured before it's clobbered.
+  with the stored overrides of THAT platform — the project override always wins.
+  `mount-kuraka.sh` runs this on EVERY mount (TTY or not), and also snapshots pre-rsync
+  so an un-backed-up tuning is captured before it's clobbered.
+- **Platform resolution** (`kuraka_common.detect_platform`, used by backup and restore):
+  `--platform` > `--target` > `$KURAKA_TARGET` > the platform dir with the most recent
+  mount manifest > `.claude`. The mount always passes `--target`; never rely on
+  autodetection in a multi-platform project.
+- `backup.yaml` records `last_backup` (full snapshot, Phase 7) and `last_overrides`
+  (the mount pre-flight) separately — a `--overrides-only` run does not fake a full backup.
 
 Trade-off (intentional): an override is a whole-file copy, so that one agent stops
 receiving framework updates while the override exists. Delete the override (revert the
@@ -226,9 +290,11 @@ comparison, so NEVER inject frontmatter at mount time for the claude target.
 Vault-side regression tests for this contract live in `tests-vault/`
 (`python3 -m pytest tests-vault/ -v`; not mounted into consumers).
 
-**Hooks (`hooks/`, Claude-only) + discipline blocks (`discipline/`).** Four
+**Hooks (`hooks/`, Claude-only) + discipline blocks (`discipline/`).** Six
 deterministic enforcement hooks (telemetry completeness, gate integrity T7,
-orchestrator write guard, output validation — see `hooks/README.md`) are mounted
+orchestrator write guard, output validation, the RETRO file's verdict line
+`retro_contract.py`, and the SessionStart state health check `session_doctor.py`
+— see `hooks/README.md`) are mounted
 into `.claude/hooks/` and wired into the consumer's `.claude/settings.json` by a
 non-destructive merge (`merge_claude_hook_settings`), for the claude target ONLY.
 Where a hook replaces manual discipline prose, the vault text keeps a slim
@@ -271,6 +337,19 @@ Those are sie_v2 team conventions that live in *that* project's git, not here. O
 `18-duplication-aware-refactor.md`, and `19-evidence.md` are framework rules
 tracked by this repo. If you
 need to edit a rule in the 01–15 range, you are in the wrong repository.
+
+### Committing vault edits BEFORE propagating them
+
+`detect_overrides` recognises a project file as "stale, not tuned" by matching it
+against the current vault or any **committed** vault version
+(`_matches_vault_history`). Editing a vault file, mounting it out, and editing it
+again without committing produces an intermediate version that matches nothing —
+so every project that received it gets it snapshotted as a fake "project
+override", and `restore_overrides` then re-applies it on every mount. That is how
+13 projects ended up pinned to a stale `run-audit` in 2026-09. Commit vault edits
+before running `--update` across projects; if it already happened, break the loop
+per file: delete the store entry, delete the project copy, re-mount (the copy is
+recreated from the vault), then re-snapshot.
 
 ### The `VAULT=` path is hardcoded in three places
 

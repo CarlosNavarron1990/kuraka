@@ -261,21 +261,22 @@ def write_config(target: Path, content: str, assume_yes: bool) -> bool:
     return True
 
 
-def project_layer_populated(target: Path) -> bool:
-    """True if .claude/project/ has real content (a subdir holding files), i.e. it was
+def project_layer_populated(target: Path, layer_root: str = ".claude/project") -> bool:
+    """True if the layer has real content (a subdir holding files), i.e. it was
     filled by amauta/arki — not just an empty skeleton we created."""
-    base = target / ".claude" / "project"
+    base = target / layer_root
     subdirs = ["conventions", "lessons-learned", "review-checks", "agents"]
     return base.exists() and any(
         (base / d).exists() and any((base / d).iterdir()) for d in subdirs if (base / d).exists()
     )
 
 
-def write_project_skeleton(target: Path, already_populated: bool) -> None:
-    base = target / ".claude" / "project"
+def write_project_skeleton(target: Path, already_populated: bool,
+                           layer_root: str = ".claude/project") -> None:
+    base = target / layer_root
     subdirs = ["conventions", "lessons-learned", "review-checks", "agents"]
     if already_populated:
-        err("   ✓ .claude/project/ ya tiene contenido — no toco el skeleton.")
+        err(f"   ✓ {layer_root}/ ya tiene contenido — no toco el skeleton.")
         return
     for d in subdirs:
         (base / d).mkdir(parents=True, exist_ok=True)
@@ -294,7 +295,7 @@ def write_project_skeleton(target: Path, already_populated: bool) -> None:
     glossary = base / "glossary.md"
     if not glossary.exists():
         glossary.write_text("# Glossary\n\nTODO: domain terms.\n", encoding="utf-8")
-    print("   + .claude/project/ skeleton (conventions, lessons-learned, review-checks, agents)")
+    print(f"   + {layer_root}/ skeleton (conventions, lessons-learned, review-checks, agents)")
 
 
 def run_mount(vault: Path, target: Path) -> int:
@@ -311,6 +312,16 @@ def run_mount(vault: Path, target: Path) -> int:
 
 def upsert_registry(vault: Path, name: str, target: Path, insp: dict,
                     mode: str, version: str, has_layer: bool) -> None:
+    # This directory may already own an entry under another slug (the config's
+    # project.name changed). Registering the new one would split the store, so
+    # keep the registered slug and say why — a real rename goes through
+    # kuraka-merge-project.py, which preserves the history and the alias.
+    registered = kc.registered_slug_for_path(vault, target)
+    if registered and registered != name:
+        err(f"   ⚠️  ya registrado como «{registered}» (config dice «{name}») — "
+            f"mantengo «{registered}» para no partir su historia.")
+        err(f"      rename intencional:  python3 kuraka-merge-project.py {registered} {name}")
+        name = registered
     reg = kc.registry_note(vault, name)  # projects/<slug>/registry.md (unified store)
     reg.parent.mkdir(parents=True, exist_ok=True)
     today = date.today().isoformat()
@@ -433,6 +444,12 @@ def main() -> int:
     ap.add_argument("--no-mount", action="store_true", help="skip mount step")
     ap.add_argument("--register-only", action="store_true",
                     help="only inspect + upsert the registry note (no config/skeleton/mount)")
+    ap.add_argument("--adopt", action="store_true",
+                    help="only draft the adoption artifacts if missing (kuraka.config.yaml "
+                         "+ the project layer skeleton); called by mount. Never overwrites, "
+                         "never mounts, never registers")
+    ap.add_argument("--layer-root", default=".claude/project",
+                    help="project-relative specialization layer (default: .claude/project)")
     ap.add_argument("--create", action="store_true", help="create target dir if missing")
     ap.add_argument("--no-components", action="store_true",
                     help="skip the recommended-components recommendation step")
@@ -481,6 +498,28 @@ def main() -> int:
     name = kc.project_slug(target, args.name)  # config project.name first → one slug everywhere
     mode = args.mode
 
+    # --config-only: the mount's safety net. Every agent (and the whole
+    # docs/process mapping: REQs, retros, telemetry) reads kuraka.config.yaml;
+    # a project mounted straight with mount-kuraka never got one, so its retros
+    # scattered (guai: 59 in agent-retrospectives/ + 41 in retros/, 36 of them
+    # duplicated) and the layer/state mapping degraded. Drafting it here costs
+    # one inspect run and is a no-op when the file already exists.
+    if args.adopt:
+        wrote = False
+        if not (target / "kuraka.config.yaml").exists():
+            insp = run_inspect(vault, target)
+            conf = insp.get("confidence")
+            note = (f"from kuraka-inspect (confidence {conf})" if conf is not None
+                    else "stack detection unavailable — generic draft")
+            write_config(target, build_config(name, mode, insp, note), True)
+            wrote = True
+        if not (target / args.layer_root).is_dir():
+            write_project_skeleton(target, already_populated=False, layer_root=args.layer_root)
+            wrote = True
+        if wrote:
+            print("     → revisá los TODO, o invocá `amauta` para rellenarlos desde el código real.")
+        return 0
+
     print("🪢 kuraka-init")
     print(f"   vault:  {vault}")
     print(f"   target: {target}")
@@ -499,12 +538,13 @@ def main() -> int:
 
     # Detect existing project layer BEFORE we touch the skeleton, so a freshly
     # created (empty) skeleton is correctly reported as not-yet-populated.
-    has_layer = project_layer_populated(target)
+    has_layer = project_layer_populated(target, args.layer_root)
 
     if not args.register_only:
         # 2 + 3 BEFORE mount so mount doesn't warn "ADOPCIÓN INCOMPLETA"
         write_config(target, build_config(name, mode, insp, confidence_note), args.yes)
-        write_project_skeleton(target, already_populated=has_layer)
+        write_project_skeleton(target, already_populated=has_layer,
+                               layer_root=args.layer_root)
         # 4. mount
         if not args.no_mount:
             print("", flush=True)
