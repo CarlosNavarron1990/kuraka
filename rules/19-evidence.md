@@ -85,6 +85,25 @@ A header that says "F-5 rejected" over a body that still implements F-5 is worse
 than no edit: reviewers read the header and inherit the lie. The mirror order
 makes that state impossible.
 
+3. **El barrido cubre TODO artefacto del ciclo**, no solo el que motivo la
+   decision: REQ, stories, freeze, ROADMAP, **CHECKPOINT** y —sobre todo— los
+   marcadores `[VERIFICADO <cmd>]`. Un `<cmd>` obsoleto dentro de una marca
+   VERIFICADO es el peor residuo posible: por T1.1(e) las fases posteriores
+   **citan** esa marca sin re-derivarla, asi que un comando que ya no produce
+   lo que la tabla afirma se propaga sin friccion.
+4. **El control positivo del barrido se PEGA EJECUTADO, con su salida.**
+   Declarar "0 residuos" sin pegar el grep es exactamente la afirmacion que
+   R-CONTROL prohibe.
+
+Evidencia (REQ-20260901): el checkpoint declaro *"Corregido en S2, S3, el REQ y
+el ROADMAP; control positivo: 0 residuos de ':47'"*. Re-ejecutado en la Fase 7,
+el grep devolvia **dos** residuos — uno en `REQ:117`, **dentro de un marcador
+`[VERIFICADO 2026-09-01: sed -n '47,66p' ...]`** cuya tabla adyacente ya decia
+`:82-99`; y otro en la **linea 38 del propio checkpoint que declaraba que no
+habia ninguno**. El cuerpo se arreglo bien; el barrido no llego al marcador ni
+al checkpoint, y el resumen firmo una limpieza que no se habia hecho entera.
+
+
 ## Scope
 
 These rules bind every agent (analysis, implementation, review, audit) AND the
