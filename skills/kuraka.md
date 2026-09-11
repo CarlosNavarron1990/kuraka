@@ -109,6 +109,22 @@ pipeline and request approval to launch. Phase 1's REQ must not contradict
 the validated outline — if `po-analyst`'s analysis diverges, surface the
 diff at the Phase 1 gate instead of absorbing it.
 
+**When the outline can't be validated in prose, show it**: run the
+`prototype-data-preview` skill. It builds ONE interactive HTML artifact whose
+left half is the real screen (real markup, real brand tokens) and whose right
+half is every table that intervenes, with the real value each column would
+receive as the user operates the mock. Reach for it when the user answers a
+question with "show me", when two options differ only in invisible state
+(what persists, what is skipped, what is silently discarded), or when the
+Phase 3 schema freeze has to decide whether a datum is stored at all. It is
+the orchestrator's own tool — a subagent cannot publish artifacts — and its
+output is a decision artifact in `docs/process/`, never shipped code.
+
+Its payoff is not the picture: it is that the table/column inventory the user
+just validated **is** the inventory Phase 3 will freeze. In the cycle that
+produced this skill (REQ-20260908) the write-preview surfaced, in one glance,
+a map pin the UI had been promising and the database had never received.
+
 ---
 
 ## Phase-Agent-Skill Map (Normal mode — 8 phases)
