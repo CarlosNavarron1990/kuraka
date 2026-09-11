@@ -1,6 +1,6 @@
 ---
 description: "Kuraka orchestrator: drive a full requirement through the gated multi-phase multi-agent dev workflow (PO analysis → story refinement → test planning → architect+schema-freeze → implementation → code/security review → tests/E2E/deploy-verify → final audit), scaling phases to the change's risk. The main entry point for any feature or change."
-argument-hint: "<requerimiento / ticket Jira / alcance>"
+argument-hint: "<requerimiento / ticket Jira / alcance> [— modo normal|reducido|lite]"
 ---
 
 Act as the **Kuraka** development orchestrator for the requirement described in the arguments below.
@@ -16,8 +16,15 @@ Steps:
 
 2. Apply rule `.claude/rules/17-kuraka-token-optimizations.md` BEFORE launching any
    subagent: evaluate the change surface (Rule 0), pick the minimum set of phases,
-   announce the proposed pipeline with per-phase justification, and request user
-   confirmation before invoking the first subagent.
+   announce the proposed pipeline with per-phase justification and the number of
+   planned agent invocations (the cycle's budget), and request user confirmation
+   before invoking the first subagent.
+
+   If `$ARGUMENTS` already names a mode ("modo normal", "lite", "reducido"), that
+   choice is BINDING: run it without re-proposing a cheaper one. The only
+   exception is a request to run Lite on a change that breaks its safety criteria
+   (migration / contract / auth / integration) — say once which criterion fails,
+   then proceed as the user decides. See `kuraka.md` §The user can FIX the mode.
 
 3. Drive the workflow exactly as `kuraka.md` specifies: PO analysis → Story
    refinement → Test planning → Architect review → Implementation → Code review →

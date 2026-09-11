@@ -136,10 +136,14 @@ For changes that **do** modify types or logic, keep the per-file check.
 
 ---
 
-## Rule T3 — Collapse Phase 1 + Phase 2 into a single subagent for low-risk changes
+## Rule T3 — Phases 1 + 2 + 2.5 collapse into a single subagent BY DEFAULT
 
-**Applies when:** the surface is purely cosmetic (restyle, rename) or purely
-mechanical (library swap with no contract change).
+**Applies BY DEFAULT**, in every mode. Phases 1 (REQ), 2 (stories) and 2.5
+(test plan) run as ONE `po-analyst` invocation unless a trigger forces the
+split: ≥4 stories, or stories the user must approve separately from the REQ.
+This rule used to be limited to cosmetic/mechanical surfaces; measurement over
+197 archived runs promoted it to the default — the split was the single most
+expensive default in the suite.
 
 **How:** instead of [[po-analyst]] → gate → [[story-refiner]] → gate, launch one
 subagent in combined mode. Prompt pattern:
@@ -157,8 +161,10 @@ is low.
 **Do NOT collapse** when the change touches business logic, API contracts,
 DB, auth or providers — there the phase separation adds real value.
 
-**Estimated savings:** ~80–100K tokens (removes one full subagent startup +
-one context re-read).
+**Measured savings:** ~350K tokens per cycle. Medians over 197 archived runs:
+Phase 1 = 123K, Phase 2 = 171K, Phase 2.5 = 179K (473K total) against 123K for
+the combined `1+2` run (17 cycles). The saving is not the prose it skips — it
+is two subagent startups and two context re-reads that never happen.
 
 ---
 
@@ -472,6 +478,12 @@ code-reviewer corrió 25–58 min en 4/8 ciclos releyendo archivos uno por uno
 Un delta de 2 lineas costo 59.634 tokens y 2 tool uses (REQ-20260822,
 revert CRIT-2): el arranque de cualquier subagente en este proyecto
 (definicion + CLAUDE.md + reglas) cuesta ~55-60K antes del primer tool use.
+
+**El piso son 60K; el costo ESPERADO es el doble.** La mediana medida sobre
+1197 runs de 100 ciclos archivados es de **120-180K por invocacion, sea cual
+sea la fase** — 4a 162K, 2.5 179K, 5 124K, 7 47K. Los 60K son lo que cuesta un
+delta trivial, no lo que cuesta una invocacion tipica. La consecuencia
+refuerza la regla: agrupar no ahorra 60K por micro-delta evitado, ahorra ~150K.
 Una micro-tarea NO amortiza un subagente. Acumula los micro-deltas
 pendientes y despachalos en UN solo run con la lista completa; reserva el
 run individual para cuando el delta no puede esperar al siguiente batch.
@@ -486,3 +498,29 @@ TODOS friccion legitima de esta clase. Al lanzar esas fases, declara el cap
 de tool_uses multiplicado x1.5 EN EL PROMPT. No se recorta la practica
 (es la que convirtio "este test puede fallar" en hecho): se presupuesta,
 para que un WARN vuelva a significar anomalia y no rutina.
+
+---
+
+## Rule T13 — El costo de un ciclo es `150K x invocaciones`, no `tokens x prosa`
+
+Medicion sobre 100 ciclos archivados (160M de tokens): la mediana por
+invocacion de subagente es de 120-180K **independientemente de la fase**,
+porque el piso lo pone el arranque del agente (definicion + reglas + contexto),
+no su trabajo. De ahi salen tres consecuencias operativas:
+
+1. **Acortar definiciones de agentes casi no mueve la aguja.** Reescribir un
+   `agents/*.md` para que sea mas corto ahorra unos pocos K de un run de 150K.
+   Optimiza el NUMERO de runs antes que su contenido.
+2. **El modo se elige contando invocaciones.** Normal = mediana 13 runs =
+   1.81M. Reduced = 6 runs = 601K. Lite = 3 runs = ~450K. Declara el conteo
+   previsto al usuario junto con el pipeline (ver `kuraka.md` §Initial
+   decision) — ese numero ES el presupuesto del ciclo.
+3. **Una fase que no puede justificar su disparador no se corre.** Cada fase
+   opcional cuesta ~150K; el disparador (schema, contrato, auth, flujo, infra)
+   es lo que la paga. Sin disparador, la fase se omite CON registro en el
+   Workflow Status, nunca en silencio.
+
+**Lo que NO se recorta por presupuesto**: 3.9 (determinista, ~0 tokens), 6.8
+(smoke) y 7 (mediana 47K, la fase mas barata de la suite). Tampoco el tier de
+modelo de los gates de juicio: un ciclo mal cerrado cuesta 1.8M de retrabajo,
+que es mas que todo lo que ahorraria degradarlos.

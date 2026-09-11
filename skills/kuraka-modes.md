@@ -7,9 +7,12 @@ user-invocable: false
 
 # Kuraka — Modes
 
-This file describes the variants of the main flow (`kuraka.md`). The
-default for incremental changes in an existing project is **Normal**
-(8 phases). The **Bootstrap** and **Brownfield** modes are entry points:
+This file describes the variants of the main flow (`kuraka.md`). For an
+incremental change in an existing project the pipeline is built **UP from
+Lite**, escalating only on a named trigger — **Normal (8 phases) is the
+ceiling, not the starting point** (see `kuraka.md` §Initial decision and
+`rules/17` T13: a cycle costs ~150K per agent invocation, so the mode IS the
+budget). The **Bootstrap** and **Brownfield** modes are entry points:
 used **once** at the start of a new project or when integrating Kuraka
 into a pre-existing codebase.
 
@@ -20,7 +23,7 @@ into a pre-existing codebase.
 | **Brownfield** | Existing project without Kuraka | `kuraka-inspect` → `amauta` → Normal Kuraka |
 | **Normal** | Change in a project with Kuraka already integrated | 8 phases (see `kuraka.md`) |
 | **Reduced by risk** | Narrow change of low complexity | 3–5 phases |
-| **Lite** | Trivial change (9 strict criteria) | 3 phases |
+| **Lite** | Change with no schema / contract / auth / integration surface (7 criteria) | 3 phases |
 | **Retroactive** | Code already implemented without Kuraka (anti-pattern) | 4 phases |
 | **Deletion cycle** | Removing code / config / a dead path | Normal, with proof-of-death gates |
 | **Partial-smoke** (front-ready / backend-pending) | Frontend done but its backend endpoint isn't deployed yet | Normal, smoke verdict pre-declared partial |
@@ -179,23 +182,32 @@ applicable in any mode.
 
 ## Mode: Lite (trivial changes, strict criteria)
 
-> ⚠️ EXCLUSIVE mode for trivial changes that meet ALL 9 criteria below.
-> If any fails → use Normal or Reduced-by-risk. Do not use Lite to save
-> time on normal changes.
+> ⚠️ Mode for changes that meet ALL 7 criteria below. If any fails → use
+> Reduced-by-risk or Normal. Do not use Lite to save time on a change that
+> carries one of the prohibited surfaces.
 
-### MANDATORY criteria
+### MANDATORY criteria (v2 — recalibrated 2026-09-11)
 
-- [ ] **≤ 3 source files affected**
-- [ ] **0 DB migrations**
-- [ ] **0 new endpoints** (only modifies existing or doesn't touch endpoints)
-- [ ] **0 SQL schema changes**
-- [ ] **0 API contract changes** (request/response stable)
-- [ ] **No impact on auth or permissions**
-- [ ] **No changes to security code** (auth, encryption, tokens)
-- [ ] **No changes to integrations**
-- [ ] **Complexity S — ≤ 50 LOC total**
+The v1 criteria (≤3 files, ≤50 LOC) qualified **0 of 100** archived cycles: a
+mode nothing can reach saves nothing. The ceiling now sits where the risk
+actually lives — the **surface**, not the line count:
+
+- [ ] **≤ 8 source files affected**
+- [ ] **≤ 200 LOC total**
+- [ ] **0 DB migrations / 0 SQL schema changes**
+- [ ] **0 new endpoints** (modifying an existing one is allowed only if its request/response stays stable)
+- [ ] **0 API contract changes**
+- [ ] **No impact on auth, permissions, or security code** (auth, encryption, tokens)
+- [ ] **No changes to integrations / provider code**
 
 If ANY fails → **NOT Lite**.
+
+**What moved, and what did not**: the size ceilings grew (3→8 files, 50→200
+LOC). The *surface* prohibitions — DB, contract, auth, integrations — did not
+move a millimetre: they are precisely what makes the omitted phases safe to
+omit, and they are non-negotiable. A 180-LOC change across 7 files touching no
+schema, no contract and no auth is exactly as safe in 3 phases as a 40-LOC
+one; v1 excluded it only because it used size as a proxy for risk.
 
 ### Cases that NEVER qualify
 
@@ -274,8 +286,14 @@ Gate: findings resolved.
 
 ### Expected saving (historical data)
 
-Typical Lite cycle: ~70% token reduction vs Normal, ~3× faster duration,
-fewer approval gates (3 vs 8).
+Target: **~450K tokens** (3 invocations × the measured ~150K floor per
+subagent) against a **median 1.81M** for a Normal cycle — ~75% reduction,
+~3× faster, 3 approval gates instead of 8.
+
+Baseline for v2, from the 100 archived cycles at the time of recalibration:
+Normal median 1.81M / 13 runs, Reduced median 601K / 6 runs, Lite 0 cycles.
+If Lite stays at 0 uses after a few cycles under v2, the criteria are still
+wrong — reopen them rather than quietly returning to Normal.
 
 ### Golden rule
 

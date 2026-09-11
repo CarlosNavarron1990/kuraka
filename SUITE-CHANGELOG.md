@@ -27,6 +27,67 @@ que con la N = la integración funcionó.
 
 ## Sin publicar (pendiente de bump por `/kuraka-harvest`)
 
+Cambios 2026-09-11 — **recalibración de costo del ciclo**. Origen: agregación de
+la telemetría del store central (100 ciclos archivados, 1197 runs, 160M tokens).
+Motivo: recorte del presupuesto de tokens de Claude del usuario.
+
+Hallazgos que motivan el cambio:
+- Mediana por ciclo: **Normal 1.81M (13 runs)** vs **Reduced 601K (6 runs)**.
+- **Lite: 0 de 100 ciclos.** Sus criterios v1 (≤3 archivos, ≤50 LOC) eran
+  inalcanzables; el modo existía y nadie podía llegar a él.
+- La mediana por invocación de subagente es **120–180K sea cual sea la fase**
+  (el piso lo pone el arranque del agente, no su trabajo) ⇒ el costo del ciclo
+  es `~150K × invocaciones`, no función de la prosa de los agentes.
+- Fases 1+2+2.5 por separado: **473K** (123K+171K+179K) vs **123K** combinadas
+  (17 ciclos ya lo habían hecho ad-hoc). El split era el default más caro.
+
+### Cambiado
+- **`skills/kuraka.md` §Initial decision** — el pipeline se construye HACIA
+  ARRIBA desde Lite con disparador nombrado por fase extra; Normal deja de ser
+  el default y pasa a ser el techo. Tabla de costo medido por fase opcional +
+  obligación de declarar el número de invocaciones previstas como presupuesto.
+- **Fases 1+2+2.5 combinadas por defecto** en un solo `po-analyst` (antes solo
+  en low-risk). Fase 3 pasa a CONDICIONAL (schema / endpoint nuevo / contrato).
+- **`skills/kuraka-modes.md` — Lite v2**: 9 criterios → 7. Los techos de tamaño
+  suben (3→8 archivos, 50→200 LOC); las prohibiciones de *superficie* (DB,
+  contrato, auth, integraciones) no se mueven — son las que hacen seguras las
+  fases omitidas. Objetivo ~450K/ciclo.
+- **`agents/po-analyst.md`** — nueva sección `Mode: COMBINED`, que el modo
+  invocaba desde 2026-06 sin que el agente lo definiera en ninguna parte.
+  Distingue `COMBINED` (tres archivos canónicos) de `LITE_COMBINED` (un
+  REQ-LITE embebido) y obliga a escalar en vez de subespecificar.
+- **`AGENT-HARNESS.yaml`** — `po-analyst` suma las skills `refine-stories` y
+  `plan-tests` y sube a `maxTurns: 80` (hace el trabajo de tres agentes).
+- **`skills/kuraka.md` §The mode gate** — el gate de modo deja de ser "apruebas
+  el pipeline que propuse" y pasa a ser un MENÚ: análisis de superficie
+  determinista (~0 tokens) → 2-3 modos viables vía `AskUserQuestion`, cada uno
+  con sus invocaciones, su presupuesto y lo que sacrifica → recomendación en UNA
+  línea, por conteo de disparadores (0→Lite, 1→Reducido, ≥2 o ≥4 stories o ≥10
+  archivos→Normal). Cuando el cambio es grande se sugiere Normal pero la opción
+  barata sigue en el menú con su costo en riesgo; lo único que no se ofrece es un
+  modo que rompa los criterios de seguridad de Lite, y aun ese se lista como
+  descartado con el criterio que falla. El menú se OMITE si el usuario ya eligió
+  modo (en `$ARGUMENTS` o en la conversación previa).
+- **`skills/kuraka.md` §The user can FIX the mode** — la escalera de escalado es
+  el razonamiento por defecto del orquestador, no una restricción al usuario.
+  Escalar se obedece en silencio (sin re-proponer el modo barato ni repetir el
+  costo ya mostrado); lo único que se rechaza es bajar a Lite saltándose sus
+  criterios de seguridad, y aun eso se dice UNA vez. El modo se puede fijar en
+  los argumentos del comando (`/kuraka <req> — modo normal`) o en el gate.
+  Nuevo campo de telemetría `mode_selected_by: user | orchestrator`, para que el
+  store distinga un modo elegido por el análisis de uno impuesto por el usuario
+  (sin él, las mediciones que produjeron esta escalera derivarían sobre sus
+  propias recomendaciones). `commands/kuraka.md` lo refleja en el paso 2 y en el
+  `argument-hint`.
+- **`rules/17`** — T3 promovida a default con las medianas medidas; T11
+  corregida (el piso son 60K, el costo esperado es el doble); nueva **T13**
+  (el costo del ciclo es `150K × invocaciones`).
+
+Lo que deliberadamente NO se tocó: el tier de modelo de los gates de juicio
+(`fable`), la fase 3.9, la 6.8 y la 7 (mediana 47K, la fase más barata de la
+suite). Un ciclo mal cerrado cuesta 1.8M de retrabajo — más que todo lo que
+ahorraría degradarlos.
+
 Cambios 2026-08-01→05 — paridad de onboarding + cableado de especificaciones al
 ciclo. Origen: análisis de contrato productor→consumidor + **primer agent-eval**
 (`amauta` ejecutado en sandbox contra `kuraka-control`, 5 spot-checks

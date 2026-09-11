@@ -77,9 +77,10 @@ profiles:
 # -----------------------------------------------------------------------------
 agents:
   # -- pipeline: analysis / authoring gates
-  po-analyst:
+  po-analyst:                    # COMBINED mode also produces stories + test plan
     profile: gate-author
-    skills: "requirement-consistency-check, analyze-requirement"
+    maxTurns: 80
+    skills: "requirement-consistency-check, analyze-requirement, refine-stories, plan-tests"
   story-refiner:
     profile: gate-author
     skills: "refine-stories"

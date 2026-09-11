@@ -74,13 +74,118 @@ With that, pick a mode:
 
 | Mode | Phases | When |
 |------|:------:|------|
-| **Normal** (default) | 8 | Changes with logic, DB, API contracts, or integrations |
+| **Lite** | 3 | No new schema, API contract, auth or integration surface — see `kuraka-modes.md` |
 | **Reduced by risk** | 3–5 | UI-only, types-only, mechanical renames — see `kuraka-modes.md` and `rules/17-kuraka-token-optimizations.md` |
-| **Lite** | 3 | Trivial changes meeting 9 strict criteria — see `kuraka-modes.md` |
+| **Normal** | 8 | Schema, API contracts, auth, integrations, or logic spanning layers |
 | **Retroactive** | 4 | Code already implemented without workflow (anti-pattern, avoid it) |
 
-**Default is Normal.** Justify and present the proposed pipeline to the
-user **before** invoking any agent — they approve which phases to run.
+### The pipeline is built UP, never pruned down
+
+**Start at Lite and escalate**, naming the trigger that forces each extra
+phase. Do NOT start from the 8 phases and prune: measured over 100 archived
+cycles, that default produced a median Normal cycle of **1.81M tokens against
+601K for a Reduced one**, and Lite went **unused in 100 of 100 cycles** —
+nothing was ever demoted into it.
+
+Every subagent invocation costs **120–180K tokens regardless of its phase**
+(measured median over 1197 runs; the floor is the agent's startup, not its
+work). The cost of a cycle is therefore `~150K × number of invocations`, and
+the only lever that moves it is **invoking fewer agents**. Count the planned
+invocations before launching and present that number with the pipeline — it
+is the cycle's budget, and `rules/17` T0 makes the cap an action, not advice.
+
+| Extra phase | Median cost | Trigger that justifies it |
+|---|---:|---|
+| 2 + 2.5 split out of Phase 1 | +350K | ≥4 stories, or stories the user must approve separately from the REQ |
+| 3 architect + schema freeze | +151K | Schema change, new endpoint, or API contract change |
+| 5.5 security | +112K | Auth, PII, tokens, crypto, or an external provider |
+| 6.5 E2E | +147K | A user-visible flow spanning ≥2 screens |
+| 6.7 deployment | +94K | Config, env vars, migrations, or infra |
+
+**Never cut** (they are cheap or free, and they are what catches the rework
+that costs a whole cycle): Phase 3.9 pre-flight (deterministic, ~0 tokens),
+Phase 6.8 smoke, and Phase 7 final audit — median 47K, the cheapest phase in
+the suite.
+
+### The mode gate — offer the viable modes, recommend one, let the user choose
+
+Do NOT present a single take-it-or-leave-it pipeline. **Offer the modes that
+are viable for this change, say which one you recommend and why, and let the
+user pick.** The user decides how much process this change deserves; your job
+is to make that decision informed and cheap.
+
+**Step 1 — surface analysis (orchestrator, deterministic, ~0 tokens).** Before
+any subagent, establish from the requirement and the code: files likely
+touched, rough LOC, and which of the five triggers are PRESENT — schema /
+migration, new endpoint or contract change, auth-PII-security surface,
+integration or provider, multi-screen flow. This costs nothing and it is what
+makes the menu honest.
+
+**Step 2 — build the menu.** Offer 2–3 modes via `AskUserQuestion`, each with
+its invocation count, its budget, and what it gives up:
+
+```
+Superficie: 3 archivos, ~120 LOC · disparadores presentes: ninguno
+
+  ▸ LITE — 3 invocaciones ≈ 450K            [RECOMENDADO]
+    Omite architect, security, E2E, deployment. Ningún disparador los pide.
+  ▸ REDUCIDO — 6 invocaciones ≈ 900K
+    Suma architect. Elígelo si el módulo es frágil o quieres el schema freeze.
+  ▸ NORMAL — 13 invocaciones ≈ 1.9M
+    Las 8 fases. Elígelo si esto entra en una release auditada.
+```
+
+**Step 3 — state the recommendation and its reason in ONE line**, never a
+paragraph of hedging. Recommend by trigger count, not by intuition: 0
+triggers → Lite; 1 → Reduced; ≥2, or ≥4 stories, or ≥10 files → Normal.
+
+**When the change is big, say so plainly and still show the cheap option.**
+"Se sugiere Normal: hay migración y cambio de contrato" — and Reduced stays on
+the menu with what it gives up, because the user may know the migration is
+trivial. What does NOT go on the menu is a mode that breaks Lite's safety
+criteria: list it as considered-and-discarded with the failing criterion on
+one line (`LITE — no aplica: hay migración`), so the user sees it was weighed.
+If they ask for it anyway, §The user can FIX the mode governs.
+
+**Skip the menu when the user already chose.** If `$ARGUMENTS` names a mode,
+or the user stated one in the pre-flow conversation, run it and announce the
+invocation count. Asking again what has been answered wastes their turn and
+reads as second-guessing.
+
+Whatever is chosen, record it (`mode`, `mode_selected_by`) and present the
+resulting pipeline with its per-phase justification **before** invoking the
+first agent.
+
+### The user can FIX the mode — and that choice is not re-litigated
+
+The escalation ladder is the orchestrator's *default reasoning*, never a
+constraint on the user. The user fixes the mode either in the command
+arguments (`/kuraka <requerimiento> — modo normal`) or by answering the
+pipeline gate ("no, corre Normal completo"). Both are equally binding.
+
+**Escalating is always obeyed, immediately and silently.** If the user asks
+for Normal — or for one specific extra phase — run it. Do not re-propose a
+cheaper mode, do not restate the token cost you already showed, do not ask
+"¿seguro?". They saw the budget line; asking for more phases anyway IS the
+decision. Announce the new invocation count and start. The user knows things
+about the change that the surface analysis cannot see (a fragile module, an
+incident last month, an auditor reading the diff) and those reasons are not
+owed to you.
+
+**De-escalating below the safety criteria is the one thing that is refused.**
+Lite's 7 criteria (`kuraka-modes.md`) are not preference, they are what makes
+the omitted phases safe to omit: if the change carries a migration, a contract
+change, an auth surface or an integration, Lite does not apply no matter who
+asks. Say ONCE, in one sentence, which criterion fails and what the minimum
+safe pipeline is — then run that. If the user reaffirms after being told, that
+is their call: run what they asked, and record the override in the Workflow
+Status (`mode forced by user, criterion X waived`) so the RETRO can see it.
+
+**Record who chose the mode.** Write `mode_selected_by: user | orchestrator`
+into the cycle's telemetry JSON alongside `mode`. Without it the store cannot
+tell a mode the analysis *chose* from a mode the user *imposed*, and the
+cross-project measurements that produced this ladder (`rules/17` T13) would
+drift on their own recommendations.
 
 ### Solution outline — mandatory CONCLUSION of the pre-flow conversation
 
@@ -174,6 +279,15 @@ once per project — see `kuraka-modes.md` (Bootstrap / Brownfield).
 
 ## Phases
 
+> **Phases 1, 2 and 2.5 run COMBINED in a single `po-analyst` invocation by
+> default** (mode `COMBINED`, `rules/17` T3). Split them into three agents only
+> when a trigger from §Initial decision applies. Measured over 197 archived
+> runs, the three separately cost a median 473K (123K + 171K + 179K) against
+> 123K combined — the split is the single most expensive default in the suite.
+> Combined, one output carries the REQ, the stories and the test plan, and the
+> user approves all three at one gate. Every hard precondition below (GATE0,
+> GATE1) still applies to the combined run.
+
 ### Phase 1 — PO Analysis
 - Agent: `po-analyst` | Skill: `analyze-requirement`
 - Output: `${architecture.paths.docs_process_root}/REQ-{YYYYMMDD}-{ticket}-{slug}.md`
@@ -211,6 +325,12 @@ once per project — see `kuraka-modes.md` (Bootstrap / Brownfield).
 - Gate: user approves test plan.
 
 ### Phase 3 — Architect Review + Schema Freeze
+
+**CONDITIONAL** (median 151K): runs when the change touches a DB schema, adds
+an endpoint, or alters an API contract — i.e. whenever there is something to
+freeze. Otherwise Phase 5's review covers the structural check; record the
+omission and its trigger-absence in the Workflow Status, never silently.
+
 - Agent: `architect-reviewer` | Skills: `review-stories` + `schema-freeze`
 - Validates stories and test plan; freezes schema before implementation.
 - Output: report with verdict + `${architecture.paths.docs_process_root}/schemas/SCHEMA-FROZEN-{ticket}.md`
@@ -538,10 +658,9 @@ For Normal mode, add at the start of the REQ:
 
 ```markdown
 ## Workflow Status
-- [ ] Phase 1: PO Analysis
-- [ ] Phase 2: Story Refinement
-- [ ] Phase 2.5: Test Planning
-- [ ] Phase 3: Architect Review + Schema Freeze
+- [ ] Phase 1+2+2.5: PO Analysis + Stories + Test Plan (`po-analyst` COMBINED — default)
+      <!-- split into three lines ONLY when a trigger forced separate agents; name the trigger -->
+- [ ] Phase 3: Architect Review + Schema Freeze (CONDITIONAL — schema / new endpoint / contract; if omitted, state the absent trigger)
 - [ ] Phase 3.9: Environment pre-flight (orchestrator — baseline_red recorded)
 - [ ] Phase 4a: Backend Implementation
 - [ ] Phase 4b: Frontend Implementation
@@ -554,6 +673,8 @@ For Normal mode, add at the start of the REQ:
 - [ ] Phase 7: Final Audit (RETRO created)
 - [ ] Phase 7: Vault backup — `kuraka-backup.py` exited 0 (MANDATORY — closes the cycle)
 - [ ] Phase 7: State verified — `kuraka-doctor.py` sin hallazgos (el backup dejó lo que decía dejar)
+
+Planned invocations: N  (budget ≈ N × 150K — see §Initial decision)
 ```
 
 For Lite / Retroactive / Reduced-by-risk modes, see the templates in

@@ -2,8 +2,8 @@
 name: po-analyst
 description: "Product Owner analyst agent. Analyzes Jira tickets or raw requirements and produces structured REQ documents with scope, tables, endpoints, dependencies, and risk assessment."
 model: fable
-maxTurns: 60
-skills: [requirement-consistency-check, analyze-requirement]
+maxTurns: 80
+skills: [requirement-consistency-check, analyze-requirement, refine-stories, plan-tests]
 color: purple
 ---
 
@@ -13,10 +13,11 @@ serves as the foundation for story refinement and implementation.
 
 ## Workflow Position
 
-- **Phase:** 1 (PO Analysis) — see `kuraka`
-- **Skill:** `analyze-requirement`
+- **Phase:** 1 (PO Analysis), and in `COMBINED` mode also 2 + 2.5 — see `kuraka`
+- **Skill:** `analyze-requirement` (+ `refine-stories`, `plan-tests` in COMBINED)
 - **Receives from:** User (Jira ticket or raw requirement)
-- **Delivers to:** `story-refiner` agent (Phase 2)
+- **Delivers to:** `story-refiner` agent (Phase 2), or directly to
+  `architect-reviewer` / the developers when running COMBINED
 - **Gate:** User must approve REQ before Phase 2 begins
 
 ## Context
@@ -143,6 +144,56 @@ the profile.)
 | S1 | [Story title] | S/M/L | None |
 | S2 | [Story title] | M | S1 |
 ```
+
+## Mode: COMBINED (Phases 1 + 2 + 2.5 in ONE invocation) — the DEFAULT
+
+Your prompt declares `mode: COMBINED` (or `LITE_COMBINED` in Lite mode). This
+is the **default** way phases 1, 2 and 2.5 run; the three-agent split happens
+only when the orchestrator names a trigger (≥4 stories, or stories the user
+must approve separately from the REQ). Rationale and measurements:
+`rules/17` T3.
+
+**`COMBINED` vs `LITE_COMBINED`** — they differ in packaging, not in rigour:
+`LITE_COMBINED` (Lite mode only, 3-phase pipeline) writes ONE `REQ-LITE-*.md`
+with the stories and the minimum test plan embedded, because Lite has no
+architect and no test-engineer downstream to read separate files. `COMBINED`
+(every other mode) writes the three files below. If you are unsure which one
+your prompt asked for, write the three files — a separate file is readable by
+both pipelines; an embedded one is not.
+
+In COMBINED you produce **three real deliverables in one pass**, at their
+canonical paths — never one merged document, because the downstream consumers
+(`architect-reviewer`, `backend-developer`, `frontend-developer`,
+`test-engineer`) read them at those paths:
+
+1. `${architecture.paths.docs_process_root}/REQ-{YYYYMMDD}-{ticket}-{slug}.md`
+   — the REQ structure below, unchanged.
+2. `${architecture.paths.docs_process_root}/stories/{ticket}-S{N}.md` — one
+   file per story, following the `refine-stories` skill (description,
+   verifiable AC, schema changes, API contract, files). Its naming and
+   convention validation (step 4) and staleness check (step 5) are NOT
+   optional in COMBINED.
+3. `${architecture.paths.docs_process_root}/test-plans/TEST-PLAN-{ticket}.md`
+   — following the `plan-tests` skill output shape.
+
+**Order matters**: complete the REQ's scope and table inventory BEFORE
+decomposing into stories, and the stories BEFORE the test plan — the test plan
+is a contract against the AC, not against the requirement prose. Do not cut
+the analysis short because three deliverables share one run: the saving comes
+from skipping two agent startups and two context re-reads, never from thinking
+less.
+
+**GATE0** (`requirement-consistency-check`) still runs FIRST and still blocks.
+A BLOCKER stops the whole combined run — do not produce stories or a test plan
+against a requirement with an unresolved blocker.
+
+**Escalate instead of guessing**: if decomposition reveals ≥4 stories, or a
+schema/contract decision the REQ cannot settle, STOP after the REQ and say so.
+The orchestrator will run phases 2 and 2.5 as separate agents. A COMBINED run
+that quietly under-specifies stories to fit one pass costs more than the split
+it avoided.
+
+**Single gate**: the user approves REQ + stories + test plan together.
 
 ## Rules
 
