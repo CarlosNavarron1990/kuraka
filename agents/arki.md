@@ -236,7 +236,11 @@ Summary ≤ 500 words:
 1. Review docs/arquitectura/stack-decision.md — push back on anything you disagree with
 2. Run the generated getting-started commands to verify the skeleton boots
 3. Start populating .claude/project/conventions/ as your team conventions surface
-4. Start your first REQ cycle: `/kuraka` → po-analyst with your first feature
+4. Run `/llimpi`: high-fidelity prototype + use-case cards + the `docs/plan/v1/` cycle plan
+   (one `.md` per `/kuraka` cycle with a ready prompt and a coverage table). A project with
+   no UI may skip it if the user decides.
+5. Start your first REQ cycle: `/kuraka` with the prompt of `docs/plan/v1/C01-*.md`
+   (or your first feature if `/llimpi` was skipped)
 
 ## Known TODOs (to fill as you go)
 - {concrete gaps}

@@ -54,8 +54,8 @@ tiers:
 #   deployment, replace that placeholder and the Codex renderer emits it.
 # -----------------------------------------------------------------------------
 platforms:
-  claude:
-    frontier: fable      # Claude Fable 5 — the judgment gates
+  claude:                 # = claude_plans.max (the vault frontmatter column)
+    frontier: fable       # Claude Fable — the judgment gates
     heavy:    opus        # Claude Opus (auto-resolves to the current Opus)
     balanced: sonnet      # Claude Sonnet (auto-resolves to the current Sonnet)
     fast:     haiku       # Claude Haiku
@@ -80,6 +80,41 @@ platforms:
     heavy:    inherit
     balanced: inherit
     fast:     inherit
+
+# -----------------------------------------------------------------------------
+# claude_plans — the Claude column PER SUBSCRIPTION. Chosen once per project at
+# mount time (`kuraka-mount.py --plan max|pro|team`, or the TTY menu) and
+# recorded in .claude/.kuraka-mount-manifest.json (`claude_plan`), so every
+# later --update keeps it. `max` MUST equal platforms.claude: the vault
+# frontmatter is the max column and a max mount stays a byte-identical copy.
+# Other plans are rendered at mount time (only the agent `model:` line changes;
+# kuraka_common.apply_claude_plan), hashed by the same function, so they never
+# read as project overrides. kuraka-apply-models.py --check validates this block.
+#
+#   max   Claude Max ("pro max", 5x/20x) — the full routing: Fable gates, Opus
+#         judgment. What the suite ran with until 2026-11.
+#   pro   Claude Pro ($20) — usage cap ~1/5 of Max 5x and Fable/Opus burn it
+#         fastest: Sonnet ceiling, Haiku for mechanical work (the routing
+#         guai-agents-platform-azure and sie-integraciones ran with).
+#   team  Claude Team (standard seat) — same limits class as Pro → same column.
+#         A premium seat behaves like Max: mount it with --plan max.
+# -----------------------------------------------------------------------------
+claude_plans:
+  max:
+    frontier: fable
+    heavy:    opus
+    balanced: sonnet
+    fast:     haiku
+  pro:
+    frontier: sonnet
+    heavy:    sonnet
+    balanced: sonnet
+    fast:     haiku
+  team:
+    frontier: sonnet
+    heavy:    sonnet
+    balanced: sonnet
+    fast:     haiku
 
 # -----------------------------------------------------------------------------
 # agents — every agents/*.md stem MUST appear here exactly once. The apply
@@ -109,6 +144,7 @@ agents:
   frontend-developer:          balanced
   story-refiner:               balanced
   test-engineer:               balanced
+  pr-writer:                   balanced
 
   # fast — mechanical / deterministic / high-volume
   deployment-verifier:         fast

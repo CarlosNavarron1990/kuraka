@@ -53,6 +53,7 @@ AGENTS=(
   deploy-diagnostician
   provider-contract-validator
   jira-ticket-sync
+  pr-writer
 )
 
 SKILLS=(
@@ -71,6 +72,7 @@ SKILLS=(
   generate-unit-tests
   generate-endpoint-tests
   generate-e2e-tests
+  recorrido-e2e
   validate-coverage
   write-tests
   verify-deployment
@@ -80,6 +82,8 @@ SKILLS=(
   compact-context
   workflow
   diagnose-deploy
+  validar-pr
+  llimpi
 )
 
 # ---------------------------------------------------------------------------

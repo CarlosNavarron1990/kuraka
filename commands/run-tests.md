@@ -1,8 +1,12 @@
-Run the full test suite for SIE v2.
+Run the project's full test suite.
 
-Execute this command from the sie_v2 directory:
+Run it from the repository root (or the backend workspace root declared in
+`kuraka.config.yaml` → `architecture.paths.backend_root`), using the project's configured
+`test_cmd` (`kuraka.config.yaml` → `stack.backend.test_cmd`; e.g. `make test`):
 ```
-cd sie_v2 && make test
+<test_cmd> > test-run.log 2>&1; echo $? > test-run.exit
 ```
 
-Report the results: how many passed, failed, and any errors.
+Never pipe the test command — the gate is its own exit code (rule 17 T7).
+
+Report the results: exit code, how many passed, failed, and any errors.

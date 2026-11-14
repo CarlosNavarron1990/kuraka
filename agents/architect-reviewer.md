@@ -107,6 +107,10 @@ all zero-rework.
 | E4 | **State machines:** multi-hop transitions = independent attempts (each its own history row); heal poisoned rows in place (≤1 active record per logical key); a swallow-as-idempotent must distinguish "already advanced" from "predecessor never reached" before returning 200; every non-terminal seeded status needs a code path entering it (a dead state is a BLOCKER). |
 | E5 | **Migrations:** resolve the `CREATE INDEX CONCURRENTLY` decision in the AC (new/empty table → plain index; large table → separate autocommit migration) — never carry CONCURRENTLY into transactional Alembic; require `alembic heads == 1` when an untracked migration exists. |
 | E6 | **LOC at freeze:** for every ALTERed file/function, `current_LOC + estimated_delta ≤ cap` (`conventions.max_file_loc` / `max_function_loc`). Over-cap is a BLOCKER with a named helper-extraction plan — do not let code-review (Phase 5) be the first place size is measured. |
+| E7 | **New state/enum value:** when the cycle adds a status/enum/kind value, read the DECLARED type of every serializer/schema that emits it (`Literal[...]`, enum class, OpenAPI enum, TS union) and list each with `file:line` in the freeze. A value the response type doesn't admit is a runtime 500 that unit tests miss (guai-home: shipped past 3 reviews). Pair with a closed-set consumer grep (switch/match/maps keyed by the enum). |
+| E8 | **Identity model is a user decision:** if a story's flow can be read as guest OR login-required (or another auth/identity variant), that is a BLOCKING question to the user — never a guessed default (guai-home: a guessed answer invalidated a whole freeze). |
+| E9 | **Reuse before create:** before freezing a NEW component/screen/endpoint for a variant of an existing one, show why parameterizing the existing one doesn't work. No justification → BLOCKER (guai-home: ~160K tokens on a parallel screen). The converse of the parity rule (#16): parity governs a second path you keep; this asks whether you need it. |
+| E10 | **HTTP status codes are derived, not written:** every status in a frozen contract cites the exception→status map (handler/middleware `file:line`) that produces it. |
 
 Freeze output records named invariants + an attack/property table with a "where"
 column (which file/line each invariant is enforced at).
@@ -174,7 +178,7 @@ HIGH / MEDIUM / LOW
 5. **Actionable MINOR findings** — include concrete examples so devs can act without follow-ups.
 6. **Verify output against** `.claude/agents/contexts/output-schemas.md` before returning.
 7. **TypeScript syntax precision** — When reviewing stories that add fields to TypeScript interfaces, verify the AC specifies the exact syntax. Flag as MINOR if AC uses informal language ("optional string") without specifying whether the field should use `?` (optional property) or `: T | null` (nullable union) — these have different semantics in strict TypeScript and must not be interchangeable in ACs.
-8. **Run the suspect path before freezing** — apply the Empirical Freeze Checklist (E1–E6) for any write / subprocess / external-client / security / contract seam. Reasoning is not proof; execute the mechanism. Freeze from the observed runtime contract, never from documentation.
+8. **Run the suspect path before freezing** — apply the Empirical Freeze Checklist (E1–E10) for any write / subprocess / external-client / security / contract seam. Reasoning is not proof; execute the mechanism. Freeze from the observed runtime contract, never from documentation.
 9. **Verify upstream claims & blast-radius before freeze** — re-run the `po-analyst` symbol-removal grep; for a JSONB / shared-column / shared-fixture change, enumerate every consumer (tests included) before approving. This is consistently the highest-ROI architect behavior.
 10. **Re-run every normative grep the stories pin** — execute each story-pinned
     grep against the CURRENT tree before freezing it as a gate: it must (a) pass
@@ -183,3 +187,4 @@ HIGH / MEDIUM / LOW
     kuraka-control S5c: a single-writer grep matched 5 files because `rm`
     hit "confi**rm**" and a `-v test` filter ate "at**test**"). Fix the
     command in the freeze; a broken grep is a dead gate.
+11. **Run hygiene** — `agents/contexts/subagent-hygiene.md` applies (read-only git).

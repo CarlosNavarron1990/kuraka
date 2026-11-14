@@ -136,6 +136,34 @@ run them every time, not only when told to.
   rationale is a finding.
 - [ ] **Re-derive every number** — test/edge/table counts and config-flag claims
   are quoted from the current run output / literal `file:line`, never recalled.
+- [ ] **State-dependent error paths** — for every error/raise path whose outcome
+  depends on prior state, enumerate the durable writes, CAS/version bumps and
+  idempotency markers that run BEFORE the raise. Each must be either rolled back
+  or intentionally kept, and the tests must assert the state of ALL of them after
+  the error. A guard that can reject must run BEFORE any irreversible step
+  (charge, email, external call, committed write). (guai-home: 3 retros — an
+  idempotency key persisted before a rejecting check made the retry a no-op.)
+- [ ] **A new error path is new attack surface** — grep the diff's new error
+  messages for interpolated paths/IDs/SQL/stack fragments, and catch-all handlers
+  that echo `err.message` (or `str(e)`) to the client. Either is at least
+  IMPORTANT; route to `security-reviewer` when it touches auth or PII
+  (kuraka-control review-check §14).
+- [ ] **Negative assertions have a positive twin** — every `not.toHaveBeenCalled`
+  / `assert_not_called` / "absent" assertion needs a sibling test where the SAME
+  spy on the SAME target is asserted called; otherwise a spy bound to the wrong
+  object (namespace vs default import, patched path vs used path) stays green
+  forever (kuraka-control LL-001/LL-006; `rules/19` R-CONTROL).
+- [ ] **Expected values come from the spec** — for every new or changed test,
+  the expected value cites a plan case / AC / REQ section / frozen-contract line
+  / business rule, and agrees with it. A test whose expectation mirrors the
+  implementation (the constant the code computes, a literal copied from the
+  function under test, a snapshot taken from the new output) with no spec source
+  is tautological: IMPORTANT, BLOCKER when it is the only coverage of an AC.
+- [ ] **Locked acceptance tests untouched** — run `python3
+  "${KURAKA_VAULT}/kuraka-testlock.py" verify <project-root> --req <REQ>`; any
+  locked test modified, skipped, loosened or deleted without an `unlock` record
+  = **BLOCKER**. Also check the red-first evidence exists (3.95 report, or the L2
+  red run in Lite).
 
 ## Stack-specific architecture checks
 
@@ -197,6 +225,18 @@ HIGH / MEDIUM / LOW
 - **INFO / SUGGESTION** — Optional improvement, opens discussion.
 - **PRAISE** — Highlight good decisions (important for team morale).
 
+**A BLOCKER must carry its proof.** Name the cycle invariant it violates (story
+AC, frozen contract, rule) with `file:line`, and show it is NOT pre-existing:
+`git show <baseline>:<file>` (or `git blame`) on the prior state. A defect the
+cycle did not introduce and does not touch is IMPORTANT or a follow-up, never a
+gate on this cycle (guai-home: BLOCKERs on pre-existing code forced re-runs).
+
+**Check the finding's history before deferring.** For an IMPORTANT-or-higher
+finding in a shared file, grep `RECURRING-ISSUES.md` and the last RETROs under
+`agent-retrospectives/` for the same file/mechanism. If it was already deferred
+twice or more, the default becomes "fix now" — say so explicitly (petsuite: the
+same fail-open was rediscovered 4 times and deferred 3).
+
 Reserve BLOCKER for must-fix-before-this-gate. If a finding comes from a strict
 sub-check (e.g. "BLOCKER: try/except present"), mark it `needs-triage` and let
 the architect's exception-clause review confirm before it gates.
@@ -217,6 +257,8 @@ the architect's exception-clause review confirm before it gates.
    pre-extracted digest (frozen schema + invariants + changed-file list, per
    `rules/17` Rule T8), review against it; do not re-read the whole surface unless
    a finding is genuinely ambiguous.
-9. **Output structure is hook-validated on Claude Code** (`SubagentStop`) — end
+9. **Run hygiene** — `agents/contexts/subagent-hygiene.md` applies (read-only
+   git, own scratchpad, no fake notifications, declared output exists).
+10. **Output structure is hook-validated on Claude Code** (`SubagentStop`) — end
    with the `**Verdict:**` line and `## Confidence`; do NOT re-read
    `output-schemas.md` as a terminal self-check. <!-- kuraka:discipline:output-validation -->

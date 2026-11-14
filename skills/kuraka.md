@@ -102,10 +102,20 @@ is the cycle's budget, and `rules/17` T0 makes the cap an action, not advice.
 | 6.5 E2E | +147K | A user-visible flow spanning ≥2 screens |
 | 6.7 deployment | +94K | Config, env vars, migrations, or infra |
 
+**3.95 acceptance tests RED is a MOVE, not an extra.** The `test-engineer`
+invocation that used to write tests after the code (Phase 6) now runs BEFORE
+it and writes the acceptance tests from the plan; Phase 6 only runs when
+`validate-coverage` shows gaps or the plan has INTERNAL cases. Count 3.95 as
+one invocation whenever Phase 4 runs on a change with an API/contract/AC-testable
+surface; do not count a separate Phase 6 unless a gap is expected.
+
 **Never cut** (they are cheap or free, and they are what catches the rework
 that costs a whole cycle): Phase 3.9 pre-flight (deterministic, ~0 tokens),
-Phase 6.8 smoke, and Phase 7 final audit — median 47K, the cheapest phase in
-the suite.
+Phase 6.8 smoke, Phase 6.9 user validation (~0 tokens — a script records it),
+and Phase 7 final audit — median 47K, the cheapest phase in the suite.
+Phase 3.95 (acceptance tests RED) is not cut either whenever Phase 4 touches an
+API / contract / AC-testable surface — it is the tester invocation moved before
+the code, not an extra one.
 
 ### The mode gate — offer the viable modes, recommend one, let the user choose
 
@@ -209,8 +219,7 @@ functionality is whole or a piece is missing. Present, in this order:
 4. **Open questions** — anything the outline could not resolve. These feed
    Phase 1's GATE0 as questions; they are never silently assumed.
 
-Only after the user validates (or corrects) the outline, propose the mode +
-pipeline and request approval to launch. Phase 1's REQ must not contradict
+Present the outline and viable mode + pipeline together, and obtain one authorization to launch. Respect any mode the user already selected. Phase 1's REQ must not contradict
 the validated outline — if `po-analyst`'s analysis diverges, surface the
 diff at the Phase 1 gate instead of absorbing it.
 
@@ -236,20 +245,54 @@ a map pin the UI had been promising and the database had never received.
 
 | Phase | Agent | Skill | Gate |
 |-------|-------|-------|------|
-| 1. PO Analysis | `po-analyst` | `requirement-consistency-check` → `analyze-requirement` | GATE0 no unresolved BLOCKER; user approves REQ |
-| 2. Story Refinement | `story-refiner` | `refine-stories` | User approves stories |
-| 2.5. Test Planning | `test-engineer` (mode: TEST_PLANNING) | `plan-tests` | User approves test plan |
+| 1. PO Analysis | `po-analyst` | `requirement-consistency-check` → `analyze-requirement` | GATE0 no unresolved BLOCKER; REQ matches authorized scope |
+| 2. Story Refinement | `story-refiner` | `refine-stories` | Stories match authorized scope; no unresolved blockers |
+| 2.5. Test Planning | `test-engineer` (mode: TEST_PLANNING) | `plan-tests` | Test plan covers authorized scope; no unresolved blockers |
 | 3. Architect Review | `architect-reviewer` | `review-stories` + `schema-freeze` | No BLOCKERS; schema frozen |
 | 3.9. Environment pre-flight | orchestrator (deterministic, ~0 tokens) | (see §Phase 3.9) | Stack boots; gate command runs; `baseline_red` recorded in checkpoint |
-| 4a. Backend Impl | `backend-developer` | `implement-story` | `${stack.backend.lint_cmd}` + `${stack.backend.test_cmd}` OK |
+| 3.95. Acceptance tests RED | `test-engineer` (mode: TEST_FIRST) | `generate-endpoint-tests` / `generate-unit-tests` from the plan's oracles | Every ACCEPTANCE case has a test, RED for the right reason; `kuraka-testlock.py lock` recorded |
+| 4a. Backend Impl | `backend-developer` | `implement-story` | `${stack.backend.lint_cmd}` + `${stack.backend.test_cmd}` OK; locked acceptance tests green; `kuraka-testlock.py verify` exit 0 |
 | 4b. Frontend Impl | `frontend-developer` | `implement-story` | `${stack.frontend.lint_cmd}` + `${stack.frontend.typecheck_cmd}` + `${stack.frontend.test_cmd}` OK |
 | 5. Code Review | `code-reviewer` | `review-implementation` | No BLOCKER or IMPORTANT |
 | 5.5. Security Review | `security-reviewer` | `security-audit` | No CRITICAL |
-| 6. Tests | `test-engineer` (mode: TEST_WRITING) | `analyze-testability` + `generate-unit-tests` + `generate-endpoint-tests` + `validate-coverage` | Tests pass |
-| 6.5. E2E | `e2e-tester` | `generate-e2e-tests` | Playwright passes |
+| 6. Coverage gaps (CONDITIONAL) | `test-engineer` (mode: TEST_WRITING) | `validate-coverage` → `analyze-testability` + `generate-unit-tests` / `generate-endpoint-tests` | Gaps + INTERNAL cases covered with sourced expectations; tests pass; testlock verify exit 0 |
+| 6.5. E2E | `e2e-tester` | `generate-e2e-tests` (promotes the recorrido spec) | Playwright passes |
 | 6.7. Deployment | `deployment-verifier` | `verify-deployment` | Docker / env / nginx / CI valid |
-| 6.8. Smoke test runtime | orchestrator (with user approval) | (custom per cycle) | Smoke doc created or skip justified |
-| 7. Final Audit | `final-auditor` | `run-audit` | Retro created **AND** vault backup done (exit 0) **AND** `kuraka-doctor` verde |
+| 6.8. Smoke test runtime | `e2e-tester` (recorrido, user-visible change) or orchestrator | `recorrido-e2e` / (custom per cycle) | RECORRIDO or SMOKE doc green, or skip justified |
+| 6.9. User validation + adjustments | orchestrator + user (`kuraka-ajuste.py`, ~0 tokens) | — | User acceptance recorded (`aceptar`) or explicit `cerrar` with reason; every adjustment logged verbatim |
+| 7. Final Audit | `final-auditor` | `run-audit` | Retro created (with `## Efectividad`) **AND** vault backup done (exit 0) **AND** `kuraka-doctor` verde |
+
+### Agent binding (HARD) — always the configured specialist, never a generic agent
+
+Every `Agent` invocation in a Kuraka cycle MUST set `subagent_type` to the
+**exact agent named in the map above** (or in §Conditional / §On-demand), so
+the project's mounted definition (`.claude/agents/<name>.md` — its prompt,
+tools, preloaded skills and `model:` tier) is what actually runs.
+
+- **FORBIDDEN as a phase agent:** `general-purpose`, `Explore`, `Plan`,
+  `claude`, `fork`, or omitting `subagent_type` (which defaults to a generic
+  agent). Never "emulate" a specialist by pasting its role into a generic
+  agent's prompt — the role then exists only in the orchestrator's context,
+  without the specialist's tools, skills, hooks or digest protocol.
+- **Do not pass `model:`** on a phase invocation — the tier comes from the
+  agent's own frontmatter, which follows the vault's `MODEL-ROUTING.yaml`.
+  **Never downgrade a tier to save tokens**: budget is cut by invoking fewer
+  agents (`rules/17` T13), never by weaker models. Override only when the user
+  explicitly asks.
+- **If the named agent is not available** (missing from the session's agent
+  list, or the call errors with an unknown type): STOP, report which agent is
+  missing, and point to `python3 kuraka-doctor.py --fix` / `kuraka-mount.py
+  --update` + restarting the session (agents register at session start).
+  Never fall back to a generic agent.
+- The telemetry `agent` field records the real `subagent_type`; a cycle whose
+  telemetry shows a generic agent (or a fused `a+b+c` slot) in a phase slot
+  **fails Phase 7**.
+- Orchestrator-run steps (3.9, 6.8, deterministic checks) and Ultra Ahorro
+  (zero subagents by design) are unaffected.
+
+(Sources: sie-v2 DD-1530 — every phase from 3 on ran as `general-purpose` with
+an inline role prompt; possuite P0/P1 — fused agent slots made telemetry
+unusable.)
 
 ### Conditional agents
 
@@ -271,9 +314,20 @@ trigger; never substitute them for a phase agent.
 | `migration-deployability` | Before merging a branch with migrations into a deployment branch | Phase 5 sub (`migration-reviewer` owns DDL quality) |
 | `checkmarx-remediation` | A Checkmarx One scan needs analysis / a remediation plan | — |
 | `jira-ticket-sync` | The project tracks work in Jira and the user asks to sync/see pending tickets | Phase 1 (it feeds `po-analyst`, doesn't replace it) |
+| `pr-writer` | The user asks for the PR text/description after the cycle (or after `validar-pr`) | Phase 7 (`final-auditor` owns the RETRO; `pr-writer` only drafts the PR body) |
 
-Entry agents (`inti` → `arki` for greenfield, `amauta` for brownfield) run
-once per project — see `kuraka-modes.md` (Bootstrap / Brownfield).
+**Pre-PR gate (skill, not agent):** when the project adopted `validar-pr`
+(`.claude/project/validar-pr/config.sh` exists), the cycle's branch reaches a
+PR only through `validar-pr.sh` — the `pr_gate` hook blocks `gh pr create|ready`
+without an APROBABLE report for HEAD. With `workflow.commit_policy: user` the
+orchestrator runs it without `--crear-pr` and hands the report to the user.
+
+Entry agents (`inti` → `arki` → `llimpi` for greenfield, `amauta` for
+brownfield) run once per project — see `kuraka-modes.md` (Bootstrap /
+Brownfield). `llimpi` is an orchestrator-run skill (`/llimpi`), not a
+subagent: it produces the prototype and the `docs/plan/vN/` cycle plan; a
+greenfield project with a plan starts each cycle from the prompt of its next
+`docs/plan/vN/Cnn-*.md`.
 
 ---
 
@@ -285,14 +339,14 @@ once per project — see `kuraka-modes.md` (Bootstrap / Brownfield).
 > runs, the three separately cost a median 473K (123K + 171K + 179K) against
 > 123K combined — the split is the single most expensive default in the suite.
 > Combined, one output carries the REQ, the stories and the test plan, and the
-> user approves all three at one gate. Every hard precondition below (GATE0,
+> the orchestrator validates all three against the authorized scope at one gate. Every hard precondition below (GATE0,
 > GATE1) still applies to the combined run.
 
 ### Phase 1 — PO Analysis
 - Agent: `po-analyst` | Skill: `analyze-requirement`
 - Output: `${architecture.paths.docs_process_root}/REQ-{YYYYMMDD}-{ticket}-{slug}.md`
 - Content: scope IN/OUT, tables, endpoints, dependencies, risks, proposed stories.
-- Gate: user approves REQ.
+- Gate: REQ matches the authorized scope and has no unresolved blockers.
 - **GATE0 PRECONDITION (HARD — runs before analyze-requirement):**
   `po-analyst` MUST run the `requirement-consistency-check` skill first.
   If it returns `BLOCKED`, STOP: turn each Blocker into an
@@ -306,7 +360,7 @@ once per project — see `kuraka-modes.md` (Bootstrap / Brownfield).
   recorded value test. See `docs/process/IMPROVEMENTS-DD-1031.md`.
 - **GATE1 PRECONDITION (HARD):** the per-Agent telemetry JSON file for this
   REQ must exist and be appended after every Agent invocation. If it does
-  not exist by Gate1, STOP and ask the user. Telemetry is not optional —
+  not exist by Gate1, create or repair it from available evidence, recording unknown values as null. If that cannot be done, stop and explain the blocker. Telemetry is not optional —
   RETRO-DD-1031 and RETRO-DD-1031-rerun were both blind audits because of
   this gap.
 
@@ -315,14 +369,18 @@ once per project — see `kuraka-modes.md` (Bootstrap / Brownfield).
 - Output: `${architecture.paths.docs_process_root}/stories/{ticket}-S{N}.md` (one per story).
 - Content: description, verifiable AC, schema changes (if any), API contract, files.
 - Rules: every identifier in `conventions.naming_language`; `conventions.null_syntax`; file paths from the stack profile; tenant scoping if `conventions.multi_tenant: true`.
-- Gate: user approves stories.
+- Gate: stories match the authorized scope and have no unresolved blockers.
 
 ### Phase 2.5 — Test Planning
 - Agent: `test-engineer` (mode TEST_PLANNING) | Skill: `plan-tests`
 - Output: `${architecture.paths.docs_process_root}/test-plans/TEST-PLAN-{ticket}.md`
-- Content: testability constraints, test cases per story, fixtures, risks, estimated test count.
-- Why: contract for the developer — the code must be testable per this plan.
-- Gate: user approves test plan.
+- Content: testability constraints, test cases per story **each with its
+  oracle** (input → expected result + the source that fixes it: AC / REQ §
+  / frozen contract / rule) and its kind (`ACCEPTANCE` | `INTERNAL`),
+  fixtures, risks, estimated test count.
+- Why: contract for the developer — and the ONLY place a test's expected value
+  may come from. A value the spec does not determine is a GATE0 question.
+- Gate: test plan covers the authorized scope and has no unresolved blockers.
 
 ### Phase 3 — Architect Review + Schema Freeze
 
@@ -347,8 +405,23 @@ never typechecked, pre-existing red tests making `exit 0` undefined).
 
 The ORCHESTRATOR runs these directly (no subagent, `rules/17` T9 style):
 
+0. **Read the project's orchestrator conventions first.** Every
+   orchestrator-run step (3.9, the per-story gates, 6.8) is bound by the
+   project layer just like an agent is: read the layer files whose
+   frontmatter `applies_to` includes `orchestrator`, and any
+   `conventions/environment-traps.md` / `conventions/gate-commands.md` in the
+   project layer (`.claude/project/` — or the platform's equivalent), before
+   running a command.
+   They record the traps this host already hit (wrong runner, stale volume,
+   CRLF, `._*` files, a gate that needs a flag). (guai-agents-platform-azure
+   FD-20, 4 retros: the orchestrator re-hit documented traps because only
+   agents read the layer.)
 1. **Boot** the dev stack (or its health probe) once, if the project has a
-   runtime component. A boot failure stops here.
+   runtime component. A boot failure stops here. The environment must be
+   **current** before any gate is trusted — recreate containers after a
+   dependency/lockfile/migration/Dockerfile change, bind every green to
+   `gates_measured_at` (HEAD), one test runner per host: see
+   `kuraka-policies.md` → "Definition of green" (not repeated here).
 2. **Run EVERY gate command any later phase will be judged by — one per
    workspace**, unmodified, plus test collection, once. Not just the primary
    test suite. For a backend+frontend repo that means, at minimum:
@@ -369,6 +442,10 @@ The ORCHESTRATOR runs these directly (no subagent, `rules/17` T9 style):
      usable even on a repo with pre-existing red (sie DD1243: 8 pre-existing
      red suites made a raw full-suite gate meaningless).
    - `baseline_green`: one line describing the passing state (counts, date).
+   - The baseline is measured **in this cycle, on this branch's HEAD**. Never
+     copy `baseline_red`/`baseline_green` from another cycle's checkpoint or
+     RETRO, even a recent one on the same branch — a reused baseline hides
+     whatever changed in between (editorialcesarvallejo F-31).
    - `baseline_migration_head`: the DB migration head at cycle start (e.g.
      `alembic heads`, `prisma migrate status`), plus `baseline_git_head`.
      **Re-run the head command (deterministic, ~0 tokens) before INTERPRETING
@@ -387,15 +464,64 @@ The ORCHESTRATOR runs these directly (no subagent, `rules/17` T9 style):
    fixed in this cycle's branch silently — they are either baseline-recorded
    or spun into their own story with the user's approval.
 
+**Per-gate environment re-probe (not just once at 3.9).** Before EVERY later
+gate that runs the test command (per-story 4a/4b, Phase 6, retro-gates), the
+orchestrator re-runs a ~0-token probe: container daemon up (`docker info` or
+equivalent) and the test-DB port free of foreign containers. On failure, print
+the exact remediation command and **RE-POLL the probe until green** — never
+advance on a verbal "it's running now" (sie-v2: a down daemon reported as up
+cost lost turns in 3 cycles; a port collision was caught at zero cost by
+exactly this probe). *(Restored 2026-11 harvest — 1.1.0 item P7, lost
+2026-08-12.)*
+
 Gate: checkpoint contains `baseline_red` + `baseline_green`, and the gate
 command is proven able to fail (rule 17 T7).
 
+### Phase 3.95 — Acceptance tests RED (spec first)
+
+**Runs whenever Phase 4 runs on a change with an API / contract / AC-testable
+surface, in every mode with a separate tester** (Lite does it inside L2, see
+`kuraka-modes.md`). The expected value of a test comes from the SPEC, never
+from the code: tests written after the implementation, by reading it, assert
+whatever the code does — bugs included — and the mutation proof cannot catch
+that (it proves the test is sensitive, not that its expectation is right).
+
+- Agent: `test-engineer` (mode TEST_FIRST).
+- Input: the plan's `ACCEPTANCE` rows (with oracles), the frozen
+  schema/contract, the 3.9 baseline, existing test infra and the interfaces the
+  stories DECLARE. Not the implementation under change.
+- Output: one test per ACCEPTANCE row, asserting the plan's oracle verbatim
+  and citing its source; each RED for the right reason (assertion failure or a
+  not-yet-existing endpoint/attribute — never an import/collection/fixture
+  error); then `python3 "${KURAKA_VAULT}/kuraka-testlock.py" lock <root> --req
+  <REQ> <files…>` and the files + red evidence in the checkpoint.
+- A row without a sourced expectation → open question to the user, not a test.
+- Gate: every ACCEPTANCE row has a locked RED test with pasted evidence.
+
+**Locked means locked.** In Phase 4 and later no agent edits a locked test.
+A developer who believes one is wrong stops and reports `conflicto de
+especificación` with the plan line; the orchestrator asks the user; if the
+user agrees the test (and the plan row) change, record it with
+`kuraka-testlock.py unlock --file F --motivo "..." --aprobado-por user` and
+re-lock after the fix. Never relax a test to match the code silently.
+
 ### Phase 4 — Implementation
 
-**PHASE 4 RULE:** a story is DONE only when its diff is committed on the
-feature branch. The orchestrator commits after each story's `make test`
-passes, before starting the next story. An uncommitted cycle is a lost
-cycle (see RETRO-DD-1031 Incident A).
+**PHASE 4 RULE:** a story is DONE only when its diff is secured. What
+"secured" means depends on `workflow.commit_policy` (kuraka.config.yaml):
+
+- `orchestrator` (default): the story's diff is committed on the feature
+  branch. The orchestrator commits after each story's gate passes, before
+  starting the next story. An uncommitted cycle is a lost cycle (see
+  RETRO-DD-1031 Incident A).
+- `user`: the team owns every git mutation. The orchestrator **never** runs
+  `git add/commit/merge/rebase/push/stash/checkout` — a story is DONE when its
+  gate passed, a ready-to-paste commit message (conventional, listing the
+  story's files) is written into the checkpoint/story file and shown to the
+  user, and `kuraka-backup.py` has run so the cycle state survives outside
+  git. Remind the user to commit before the next story if stories share files.
+  (guai-agents-platform-azure FD-18 / -aws: the per-story commit contradicted
+  teams that forbid agent commits.)
 
 Two sub-phases that can run in parallel if stories are independent (when
 `workflow.parallel_implementation: true`):
@@ -421,6 +547,10 @@ jest) does NOT typecheck the graph — never accept "tests green" as proof of a
 clean build. If the stack defines `typecheck_cmd` for a workspace, a story is
 not done until that command exits 0. (Source: kuraka-control LL-014 — an
 invalid cast rode green ~3 cycles because the gate ran the test runner only.)
+Gate 4 also requires: the locked acceptance tests of every implemented story
+GREEN, and `python3 "${KURAKA_VAULT}/kuraka-testlock.py" verify <root> --req
+<REQ>` exit 0 (a locked test modified or deleted without an `unlock` record
+fails the gate).
 
 ### Phase 5 — Code Review
 - Agent: `code-reviewer` | Skill: `review-implementation`
@@ -444,17 +574,25 @@ invalid cast rode green ~3 cycles because the gate ran the test runner only.)
 - Vocabulary: CRITICAL / HIGH / MEDIUM / LOW / INFO.
 - Gate: no CRITICAL; HIGH explicitly accepted by the user.
 
-### Phase 6 — Tests
-- Agent: `test-engineer` (mode TEST_WRITING) | Skills: `analyze-testability`,
-  `generate-unit-tests`, `generate-endpoint-tests`, `validate-coverage`.
-- Writes tests per the plan from Phase 2.5, following the stack profile's
-  test idioms.
-- Run: `${stack.backend.test_cmd}` + `${stack.backend.lint_cmd}`.
-- Gate: all tests pass.
+### Phase 6 — Coverage gaps (CONDITIONAL)
+- Runs only when `validate-coverage` reports gaps against the plan or the plan
+  has `INTERNAL` cases (helpers whose interface did not exist before Phase 4).
+  The acceptance tests already exist (3.95) — Phase 6 never rewrites them.
+- Agent: `test-engineer` (mode TEST_WRITING) | Skills: `validate-coverage`,
+  `analyze-testability`, `generate-unit-tests`, `generate-endpoint-tests`.
+- The code is read to find WHAT is untested, never WHAT to expect: every
+  expected value cites its plan case / AC / rule; a behavior that contradicts
+  the plan is a finding (bug or spec gap), never an adjusted expectation.
+- Run: `${stack.backend.test_cmd}` + `${stack.backend.lint_cmd}` + testlock verify.
+- Gate: all tests pass; testlock verify exit 0.
 
 ### Phase 6.5 — E2E
 - Agent: `e2e-tester` | Skill: `generate-e2e-tests`
 - Scope: only the golden path of changed flows.
+- **When a recorrido ran (6.8)**, 6.5 is its PROMOTION into the regression
+  suite — no second spec for the same flow. Order in Normal mode: the
+  recorrido runs right after Phase 6 (it is cheaper to find the broken step
+  before 6.5/6.7), and 6.5 promotes it.
 - Legitimate skip: pure-backend cycle with no user-facing changes.
 - Gate: Playwright green.
 
@@ -476,6 +614,23 @@ flow before declaring the cycle closed. The guiding principle is
 **The orchestrator CANNOT invoke Phase 7 (Final Audit / RETRO)** without
 having completed or explicitly justified this phase. If it tries, it
 must revert and complete 6.8 first.
+
+**User-visible change → the smoke IS a browser recorrido** (`recorrido-e2e`,
+run by `e2e-tester`, every mode including Lite — budget it as one more
+invocation). A real browser walks the RECORRIDO table of the test plan
+(one row per acceptance criterion: action → expected UI → expected backend
+effect with its exact endpoint/query) through a deterministic Playwright spec
+that asserts the screen AND re-fetches the backend effect per step, against
+the isolated `validar-pr` stack when the project has one (providers mocked),
+else the stack recorded in 3.9. Its doc
+`smoke-tests/RECORRIDO-{REQ}.md` satisfies step 4 below. Interactive browser
+tools only discover selectors; the verdict is the spec's exit code. A
+`FAIL — paso #k` opens the bug-fix story (step 5) and, after the fix, **the
+same spec is re-run unchanged** — that is what removes the manual
+smoke→fix→smoke loop the RETROs keep billing. The planner (Phase 2.5 /
+COMBINED) owns the table; if it is missing, ask `po-analyst` for the delta
+rather than letting the tester design steps from the code it is testing.
+Backend-only / non-visual cycles keep the scenario below.
 
 **Mandatory steps:**
 
@@ -532,6 +687,21 @@ must revert and complete 6.8 first.
    advancing to Phase 7. **Do not close the cycle with a broken
    end-to-end flow.**
 
+**"The agent cannot run it" ≠ "it cannot be run" (HARD).** If the smoke is
+not automatable from the agent's host but the USER can run the app (their
+IDE, another OS, a corporate VPN), the smoke is NOT skipped — it becomes a
+**user-executed smoke**: the orchestrator writes the full scenario FIRST
+(preconditions, numbered steps, expected assertion per step) into
+`SMOKE-{ticket}.md`, the user executes and reports, the orchestrator records
+the observed column + verdict. Handoffs quote the verdict **textually**
+(`PASS PARCIAL` stays `PASS PARCIAL`, never a numeric paraphrase). For
+cycles touching **auth / session / security-critical paths** this is a
+BLOCKING gate with no deferral: without an executed smoke the cycle closes
+**`PENDING-SMOKE`**, never DONE (facturacion-honorarios ENTRAID: conflating
+the two let 5 stacked defects survive a "closed" cycle — one full extra
+cycle + 5 user-in-the-loop iterations). *(Restored 2026-11 harvest — 1.1.0
+item P12, lost 2026-08-12.)*
+
 **Skip request** (no automatic skip): the orchestrator may ASK the user
 to skip 6.8 ONLY in these cases, and only with explicit approval:
 
@@ -548,8 +718,9 @@ an accepted risk with the textual justification.
 
 **Gate**:
 `${architecture.paths.docs_process_root}/smoke-tests/SMOKE-{ticket}.md`
-exists and green, OR skip justification approved by the user and
-documented in the RETRO.
+exists and green (agent-run or user-executed), OR skip justification
+approved by the user and documented in the RETRO. Auth/session/security
+cycles: no skip — executed smoke or `PENDING-SMOKE`.
 
 **Why**: lessons such as the smoke-test invariant generalize a common
 failure mode — `${stack.backend.test_cmd}` green + reviews approved +
@@ -557,6 +728,46 @@ RETRO closed does NOT guarantee the pieces work together. Without this
 phase, any cycle can close with green tests and a broken feature —
 the hidden cost is shifted to post-close and doesn't appear in formal
 metrics.
+
+### Phase 6.9 — User validation and adjustments (effectiveness) — MANDATORY
+
+**Applies in EVERY mode** (Normal, Reduced, Lite, Retroactive; Ultra Ahorro
+records a one-line acceptance with the same script). Green gates and a green
+smoke prove the cycle did what Kuraka understood; only the user can say it is
+what they wanted. This phase measures that gap, and turns it into framework
+learning instead of silent rework.
+
+The ledger is written by a **script, never by hand** (zero tokens):
+`python3 "${KURAKA_VAULT}/kuraka-ajuste.py" <cmd> <project-root> --req <REQ> …`
+→ `${architecture.paths.docs_process_root}/ajustes/AJUSTES-<REQ>.{jsonl,md}`.
+
+1. **Present** the outcome sentence (the one declared in the solution outline)
+   and the 6.8 evidence (RECORRIDO / SMOKE verdict, quoted textually). Ask the
+   user to try it and answer: *acepto* / *hay que ajustar*.
+2. **Every adjustment the user asks for is recorded VERBATIM against the
+   RUNNING cycle** before any code moves — never folded silently into a fix:
+   `kuraka-ajuste.py add … --tipo <bug|ux|cambio-alcance|falto-preguntar|falto-hacer|entorno> --debio "<phase agent>" --texto "<user's words>"`.
+   Classify honestly — `--debio` names the phase/agent that should have caught
+   it (e.g. `1 po-analyst` for a question never asked, `6.8 recorrido` for a
+   flow the smoke did not walk). `falto-preguntar` / `falto-hacer` are the
+   signal that improves Kuraka; `cambio-alcance` is a real new decision (record
+   it, and get the delta approved like any scope change).
+3. **Resolve** through the normal machinery: a Phase 4 delta by the developer
+   agent (gates, review on the delta), then re-run **the same** recorrido /
+   smoke spec, `kuraka-ajuste.py resolver --id N --resolucion "…"`, and open
+   the next round with `kuraka-ajuste.py ronda`. Back to step 1.
+4. **Close** only with the user's explicit acceptance:
+   `kuraka-ajuste.py aceptar --req <REQ> [--nota "…"]`. If the user stops
+   without accepting, record why: `kuraka-ajuste.py cerrar --motivo "…"`.
+5. **On acceptance, run Phase 7 IMMEDIATELY, in the same session.** Do not end
+   the turn on "¡listo!": the 2026-11 store audit found ~100 cycles across
+   projects left open without a RETRO because the session ended right after the
+   user validated — their lessons never reached the layer or the vault.
+
+Gate: `kuraka-ajuste.py estado --req <REQ>` shows `aceptacion` ≠
+`sin-aceptacion` (or a recorded `cerrar` reason) and 0 unresolved adjustments
+(or each pending one carried as an explicit follow-up). The Phase 7 RETRO's
+`## Efectividad` section is built from `estado --json`.
 
 ### Phase 7 — Final Audit
 - Agent: `final-auditor` | Skill: `run-audit`
@@ -566,6 +777,9 @@ metrics.
   - Findings per agent + concrete prompt patches OR project-layer additions.
   - Systemic issues + improvements.
   - Token / latency telemetry.
+  - `## Efectividad (validación del usuario)` from `kuraka-ajuste.py estado
+    --json`: every `falto-preguntar` / `falto-hacer` becomes a project-layer
+    patch applied here and tagged `harvest-candidate`.
 - **Agent Tuning & Patch Application:** Apply approved project-layer or agent prompt patches directly to the project's mounted agent files (`.agents/agents/`, `.agents/skills/`, `.agents/project/` for Antigravity; `.claude/` for Claude Code; `.cursor/` for Cursor; `.codex/` for Codex). This closes the retro-apply loop so future cycles benefit from tuned agent behavior.
 - **MANDATORY last step — vault backup (never skip):** after the RETRO is
   written and patches applied, snapshot the project's full Kuraka state into the central vault store:
@@ -597,6 +811,38 @@ metrics.
 
 ---
 
+## Project guidelines win — Kuraka absorbs, never overwrites
+
+Many projects arrive with their own conventions: `.claude/rules/`,
+`CLAUDE.md`, skills and hooks tracked in the project's git (azure:
+`validar-pr`, `security-audit`, `code-review-equipo`, `rules/01–13`), plus the
+specialization layer. Order of precedence on conflict, highest first:
+
+1. The user's instruction in this session.
+2. The project's own tracked guidelines (`CLAUDE.md`, `.claude/rules/*` not
+   shipped by Kuraka, tracked project skills/hooks) and the layer
+   (`.claude/project/`).
+3. Kuraka defaults (agents, skills, rules 16–23, policies).
+
+- **Never edit a project-tracked file** to make Kuraka fit — not during mount,
+  backup or a cycle (the mount skips them and reports them as project-owned).
+  If a Kuraka rule contradicts a project rule, follow the project's and note
+  the conflict in the RETRO as a candidate for the layer or for the harvest.
+- **Same-name skill (project vs Kuraka):** the project's copy is the one on
+  disk and the one that runs. Agents that preload a Kuraka skill by that name
+  (AGENT-HARNESS `skills:`) then receive the project's text — today
+  `security-reviewer` → `security-audit`; `validar-pr` is not preloaded. When
+  the project's skill is a different process (azure `security-audit` = the
+  team's OWASP/RGPD checklist), tell the agent in its prompt: "the preloaded
+  `security-audit` is the project's checklist — apply it AND the Phase 5.5
+  contract in your definition (`security-reviewer.md`)". The Kuraka contract
+  is the floor, the project's checklist adds to it.
+- **Same-purpose tools:** prefer the project's (its `validar-pr`, its gate
+  commands from `conventions/gate-commands.md`, its e2e harness) and feed
+  their output into the phase gates instead of running a Kuraka duplicate.
+
+---
+
 ## Orchestrator constraint (do NOT touch code directly)
 
 The orchestrator (the Claude running Kuraka) **NEVER** creates or modifies
@@ -610,6 +856,12 @@ with no exceptions for "the change is trivial".
 **Legitimate exception**: the orchestrator may edit `docs/` (REQ,
 stories, test plans, retros) and Kuraka system files (`.claude/skills/`,
 `.claude/agents/`, `.claude/rules/`).
+
+**Mode exception**: in **Ultra Ahorro** (`kuraka-ahorro.md`, selected by the
+user) the main session IS the implementer, for the files it declared in advance
+and nothing else. That mode runs no phases and no gates, so this constraint
+does not apply to it — and it is never a way to bypass this constraint from
+inside a delegated cycle: switching modes mid-cycle is the user's call.
 
 *(Claude Code: enforced by harness — the `orchestrator_guard` PreToolUse hook
 blocks main-session writes under the configured code roots; the documented
@@ -626,7 +878,7 @@ errors and broken telemetry.
 
 - **Never skip phases** when the pipeline includes them — every gate exists
   for a reason.
-- **User approval between phases** — the orchestrator never auto-advances.
+- **Continuous execution:** Once the user has authorized the scope and mode, advance through passing gates without requesting further approval. Record each gate, checkpoint, and evidence; report progress without ending the turn. Pause only for unresolved material decisions, failed gates that cannot be remedied, explicit user pauses, or actions requiring separate authorization. Never waive a failed gate silently.
 - **Schema freeze before Phase 4** — no DB changes during implementation.
 - **Refresh stale stories** if the user makes corrections between phases.
 - **One story at a time in Phase 4** — baby steps.
@@ -641,6 +893,19 @@ errors and broken telemetry.
   touch X") — is never evidence on its own (REQ-20260703: a false "untouched"
   claim survived the developer report and two reviews; two zero-token
   orchestrator gates caught it).
+- **Frozen contracts are never paraphrased** (HARD): an implementation/fix
+  prompt references SCHEMA-FROZEN by anchor and pastes the **literal contract
+  block + the delta** — never rewritten signatures or re-described wiring
+  locations (two prompt-divergence defects came from paraphrase). Any text a
+  parser will read (XML/JSON/YAML/SQL/config) is pasted in final syntax or
+  delegated to an implementer; after ANY config-file edit the orchestrator
+  validates it with the real parser at ~0 tokens (e.g.
+  `python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse(sys.argv[1])" f`)
+  — never by "reading it". Presence/absence claims about config entries use a
+  parser, not grep: comments defeat grep in both directions (an XML comment
+  containing `--` broke a whole config parse — 8 cascading errors; 5 grep
+  gates were wrong in one cycle). *(Restored 2026-11 harvest — 1.1.0 item P15,
+  lost 2026-08-12.)*
 - **Green tests ≠ working feature** (universal guiding principle): EVERY
   Kuraka cycle, regardless of change type or integration, must exercise
   the end-to-end flow before closing (see Phase 6.8).
@@ -658,24 +923,38 @@ For Normal mode, add at the start of the REQ:
 
 ```markdown
 ## Workflow Status
+<!-- GENERATED from the checkpoint's `phases_completed` — never hand-ticked.
+     Regenerate this block from the checkpoint at every phase transition; a
+     box is [x] only if its phase id is in phases_completed. The rows for
+     3.9, 6.8, 6.9 and 7 are NEVER deleted from the block: if the mode skips one,
+     the row stays with "SKIPPED — <reason>". -->
 - [ ] Phase 1+2+2.5: PO Analysis + Stories + Test Plan (`po-analyst` COMBINED — default)
       <!-- split into three lines ONLY when a trigger forced separate agents; name the trigger -->
 - [ ] Phase 3: Architect Review + Schema Freeze (CONDITIONAL — schema / new endpoint / contract; if omitted, state the absent trigger)
 - [ ] Phase 3.9: Environment pre-flight (orchestrator — baseline_red recorded)
+- [ ] Phase 3.95: Acceptance tests RED + locked (`test-engineer` TEST_FIRST — N tests, red evidence)
 - [ ] Phase 4a: Backend Implementation
 - [ ] Phase 4b: Frontend Implementation
 - [ ] Phase 5: Code Review
 - [ ] Phase 5.5: Security Review
-- [ ] Phase 6: Tests
+- [ ] Phase 6: Coverage gaps (CONDITIONAL — only if validate-coverage shows gaps / INTERNAL cases)
 - [ ] Phase 6.5: E2E Tests
 - [ ] Phase 6.7: Deployment Verification
 - [ ] Phase 6.8: Smoke test runtime (MANDATORY — skip only with explicit justification)
-- [ ] Phase 7: Final Audit (RETRO created)
+- [ ] Phase 6.9: User validation — `kuraka-ajuste.py aceptar` (rounds: N · adjustments: N · faltó: N)
+- [ ] Phase 7: Final Audit (RETRO created, with `## Efectividad`)
 - [ ] Phase 7: Vault backup — `kuraka-backup.py` exited 0 (MANDATORY — closes the cycle)
 - [ ] Phase 7: State verified — `kuraka-doctor.py` sin hallazgos (el backup dejó lo que decía dejar)
 
 Planned invocations: N  (budget ≈ N × 150K — see §Initial decision)
 ```
 
+**The status is a VIEW of the checkpoint, not a second source of truth.**
+At each phase transition the orchestrator rewrites the block from
+`phases_completed` (plus `skipped_phases` with their reasons) — it does not
+tick boxes by memory. A status that disagrees with the checkpoint is a Phase 7
+finding. (guai-agents-platform-azure FD-7/FD-26, 7 retros: hand-maintained
+status went stale or silently dropped 3.9/6.8.)
+
 For Lite / Retroactive / Reduced-by-risk modes, see the templates in
-`kuraka-modes.md`.
+`kuraka-modes.md` — the same generation rule applies.

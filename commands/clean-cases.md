@@ -1,8 +1,9 @@
 Truncate cases and task logs from the local database.
 
-Run this from the sie_v2 directory:
+Run it from the repository root (or the backend workspace root declared in
+`kuraka.config.yaml` → `architecture.paths.backend_root`), using the project's clean target:
 ```
-cd sie_v2 && make clean-cases
+make clean-cases
 ```
 
 After running, confirm what was truncated.

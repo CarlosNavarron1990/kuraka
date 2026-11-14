@@ -165,5 +165,7 @@ def test_no_new_skill_command_collisions_in_the_vault():
     silently drop that skill's registration."""
     skills = {p.stem for p in (VAULT / "skills").glob("*.md")}
     commands = {p.stem for p in (VAULT / "commands").glob("*.md")}
-    assert skills & commands == {"kuraka"}, (
+    # Deliberate collisions: the command is the entry point and the skill is
+    # mounted flat-only (never registered) — kuraka, and llimpi (2026-11 harvest).
+    assert skills & commands == {"kuraka", "llimpi"}, (
         f"unexpected skill/command name collision(s): {sorted(skills & commands)}")

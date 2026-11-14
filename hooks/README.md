@@ -9,12 +9,21 @@ discipline prose via the `discipline/` block expansion (see CLAUDE.md).
 
 | Hook | Event (matcher) | Enforces | On violation |
 |---|---|---|---|
-| `telemetry_append.py` | PostToolUse (Task) | Telemetry completeness: appends every subagent run to `<docs_process_root>/agent-telemetry/HOOK-LOG.jsonl` | n/a — capture only; the orchestrator enriches + consolidates |
-| `gate_integrity.py` | PreToolUse (Bash) | Rule T7: gate commands (`test_cmd`/`lint_cmd`/`typecheck_cmd`) never piped | exit 2 + fix; escape: `KURAKA_GATE_PIPE_OK` marker in the command (user-approved) |
-| `orchestrator_guard.py` | PreToolUse (Write/Edit) | Orchestrator never writes under code roots; subagents unaffected | exit 2; one-shot user-approved escape: `touch .claude/hooks/ALLOW-ORCH-WRITE` |
+| `telemetry_append.py` | PostToolUse (Task) | Telemetry completeness: appends every subagent run to `<docs_process_root>/agent-telemetry/HOOK-LOG.jsonl`. Usage is read from the STRUCTURED response first (`totalTokens`/`totalToolUseCount`/`totalDurationMs`, any nesting), then `<usage>` XML tags, then a regex; missing stays `null` (the regex-only version logged 100% null tokens in 6 projects; `kuraka-doctor` now flags an all-null HOOK-LOG) | n/a — capture only; the orchestrator enriches + consolidates |
+| `gate_integrity.py` | PreToolUse (Bash) | Rule T7: gate commands (`test_cmd`/`lint_cmd`/`typecheck_cmd`) never piped. Only the gate's OWN segment counts (scan stops at `;` `&&` `||` `&` newline) and `|` inside quotes is data; placeholder values (`TODO`/`TBD`/`<cmd>`, empty) are not gates | exit 2 + fix; escape: `KURAKA_GATE_PIPE_OK` marker in the command (user-approved) |
+| `orchestrator_guard.py` | PreToolUse (Write/Edit) | Orchestrator never writes under code roots; subagents unaffected | exit 2; one-shot user-approved escape: `touch .claude/hooks/ALLOW-ORCH-WRITE`. Standing exception for the user-selected **Ultra Ahorro** mode: a write passes when an `active` `.claude/ultra-ahorro/<cycle>.json` names exactly that file — the first such write binds the cycle to the calling `session_id` (`<cycle>.owner`, O_EXCL), so no other session inherits it, and any non-`active` status revokes it |
 | `output_validate.py` | SubagentStop | Universal output contract (Confidence line; Verdict for reviewers) | exit 2 once (loop-guarded); agent re-emits its report |
 | `retro_contract.py` | PostToolUse (Write) | The RETRO **file** carries `## Confidence: HIGH\|MEDIUM\|LOW` — what `find_verdict` parses into `meta.yaml` + `projects/INDEX.md` | exit 2 once per RETRO (loop-guarded); the agent appends the line |
 | `session_doctor.py` | SessionStart | Kuraka state health (`kuraka-doctor.py --brief`): config, layer, mount manifest, overrides↔store, retros archived, telemetry attached, state mirrored | never blocks — surfaces the findings as context; repair with `kuraka-doctor.py --fix` |
+| `pr_gate.py` | PreToolUse (Bash) | `validar-pr` gate: `gh pr create/new/ready` needs an APROBABLE report for HEAD; blocks a push to a protected branch or one that skips pre-push. **Inert unless the project adopted validar-pr** (`.claude/project/validar-pr/config.sh`); `workflow.validar_pr.enforce_hook: false` turns it off | exit 2 with the reason; fail-open on any error |
+| `state_backup.py` | SubagentStop + Stop | Continuous backup: `kuraka-backup.py --state-only` (incremental layer + docs/process, never deletes, no closure check) so an UNCLOSED cycle still reaches the store — azure GUAI-3141 never reached Phase 7 and its files were swept into a git stash | never blocks; throttled to once per 10 min (`.claude/.kuraka-state-backup.stamp`); fail-open |
+
+Ultra Ahorro's other invariant — **zero subagents** — is NOT a hook: subagent
+spawns do not go through `PreToolUse`, so there is nothing to intercept. It is
+enforced natively by `disallowed-tools: Task` in the skill's frontmatter, which
+removes delegation from the tool pool while the skill is active (the same
+frontmatter pins `model:`/`effort:`). Platforms without that contract keep the
+manual prose via `discipline/ultra-ahorro-evidence.md`.
 
 All hooks are fail-open (unexpected input → exit 0) and inert outside a Kuraka
 project (they require `kuraka.config.yaml`). Wiring lives in

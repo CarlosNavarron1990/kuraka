@@ -240,9 +240,32 @@ workflow:
   #   reduced      — 3-5 phases. Narrow changes (UI-only, types-only, renames).
   #   lite         — 3 phases. Trivial changes meeting 9 strict criteria.
   #   retroactive  — 4 phases. Anti-pattern: code already implemented.
+  #   ultra-ahorro — 0 agents. Direct implement+verify in the main session, no
+  #                  independent review. Only choose it as the default when the
+  #                  project knowingly accepts self-review (kuraka-ahorro.md).
   # Fase 5 (workflow restructure) will rebrand:
   #   normal → compliance, and introduce a new `standard` (4 phases) as default.
   default_mode: normal
+
+  # Optional, Codex only. Omit to inherit default_mode; no other tool reads it.
+  # ultra-ahorro = direct implementation + verification, zero subagents.
+  # Other values: normal | reduced | lite | retroactive | compliance | standard.
+  # codex_default_mode: ultra-ahorro
+
+  # Optional. Ultra Ahorro tuning; every field has a framework default, so omit
+  # the whole block to keep them. `enabled: false` removes the mode from this
+  # project (the entry then says so instead of running). `enabled: true` does
+  # NOT make it the default — that is `default_mode` alone.
+  # The three limits are REVIEW thresholds: crossing one forces a scope
+  # reevaluation, it does not auto-reject. Zero subagents is an invariant of the
+  # mode and is deliberately not configurable.
+  # ultra_ahorro:
+  #   enabled: true              # default true where the platform supports it
+  #   max_source_files: 5        # implementation files; tests count separately
+  #   max_changed_lines: 200     # adds + deletes in implementation files
+  #   max_fix_attempts: 2        # same failure twice -> reevaluate, don't loop
+  #   context_warning_tokens: 60000   # advisory only; report `unknown` with no
+  #                                   # reliable measurement, never a guess
 
   # If true, the orchestrator pauses at every gate and asks the user to confirm
   # before advancing to the next phase. If false, gates auto-pass when checks
@@ -253,3 +276,22 @@ workflow:
   # when their stories are independent. If false, sequential (backend first
   # if there's an API contract).
   parallel_implementation: true
+
+  # Optional. Who performs git mutations during a cycle.
+  #   orchestrator (default) — the orchestrator commits each story on the
+  #                  feature branch once its gate passes (kuraka.md §Phase 4).
+  #   user         — the team owns every git mutation: the orchestrator never
+  #                  runs add/commit/merge/rebase/push/stash/checkout; a story is
+  #                  DONE when its gate passed, a ready-to-paste commit message
+  #                  was proposed, and kuraka-backup.py ran.
+  # commit_policy: orchestrator
+
+  # Optional. Branch PRs target (pr-writer, validar-pr). Omit to detect it
+  # (`git symbolic-ref refs/remotes/origin/HEAD`, else main/master).
+  # base_branch: develop
+
+  # Optional. validar-pr pre-PR gate (skills/validar-pr.md). Omit the block to
+  # keep the defaults; the hook that blocks `gh pr create` is Claude-only.
+  # validar_pr:
+  #   enforce_hook: true        # block `gh pr create` without an APROBABLE report for HEAD
+  #   reviewer_cmd: "claude -p" # blind reviewer invocation; "" disables step 4

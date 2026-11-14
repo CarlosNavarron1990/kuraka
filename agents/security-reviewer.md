@@ -145,6 +145,29 @@ declarations.
   framework equivalent).
 - [ ] Logs do not include PII.
 
+### 6. Threat-class and input-channel checks (run on EVERY review)
+
+- **"Safe by construction" is proven per threat class, not once.** A claim that a
+  change is safe must be measured separately for (a) injection/XSS (output
+  encoding at the sink), (b) network/SSRF (what can be reached), and (c)
+  parse-cost / DoS (worst-case input size and superlinear parsing — regex,
+  recursive JSON/XML/markdown, decompression). One argument does not cover the
+  others (kuraka-control LL-008 + FP-10).
+- **Phase 5.5 is not skippable** when the diff adds a throw/error path or a
+  parser over third-party content, even if the story "has no security surface".
+- **New error paths are attack surface** — no interpolated paths/IDs/SQL/stack in
+  error messages; no catch-all handler echoing `err.message`/`str(e)` to the
+  client (kuraka-control review-check §14).
+- **Uploaded files are hostile input** — size/type/count limits enforced server
+  side, content sniffed (not just extension), decompression bounded; probe with
+  the smallest malicious file you can build (editorial LL-013).
+- **Personal identifiers never travel in URLs** (path or query string): they land
+  in access logs, proxies and referrers. Sweep the real access log for every
+  client-supplied channel during the cycle's smoke (editorial LL-024/LL-034).
+- **A server guard that compares against a value the client stores** (local
+  storage, cookie, hidden field) inherits every client write of that value — it
+  is not a guard until the value is server-owned (editorial LL-029).
+
 ## Severity Levels
 
 - **CRITICAL** — Immediate security risk. Blocks merge. Examples: hardcoded secret, SQL injection, missing auth on endpoint.
@@ -201,6 +224,12 @@ HIGH / MEDIUM / LOW
 7. **Verify scope claims with your own diff** — never cite the developer's or
    code-reviewer's report as proof that a function is unchanged; cite the diff
    you ran.
+8. **A CRITICAL/HIGH must carry its proof** — name the violated invariant
+   (`file:line`) and show it is not pre-existing (`git show <baseline>:<file>`).
+   Pre-existing and untouched → report as follow-up, do not gate the cycle
+   (guai-home). Before deferring a HIGH in a shared file, grep
+   `RECURRING-ISSUES.md` / prior RETROs: deferred ≥2 times → fix now (petsuite).
+9. **Run hygiene** — `agents/contexts/subagent-hygiene.md` applies (read-only git).
 
 ## Output Validation
 

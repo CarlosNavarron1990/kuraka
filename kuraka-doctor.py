@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import json
+import shutil
 import re
 import subprocess
 import sys
@@ -54,7 +56,7 @@ PLATFORM_TARGET = {"claude": "claude", "agents": "antigravity",
                    "codex": "codex", "cursor": "cursor"}
 
 # how a finding is repaired: adopt (draft config/layer) | register | overrides |
-# backup (cycles+telemetry+state) | remount | manual
+# backup (cycles+telemetry+state) | instruments (restore lost rules/scripts) | remount | manual
 class F:
     def __init__(self, code: str, msg: str, fix: str = "manual", hint: str = ""):
         self.code, self.msg, self.fix, self.hint = code, msg, fix, hint
@@ -98,11 +100,137 @@ def retro_reqs(project: Path, docs_root: str) -> set:
     return out
 
 
+_REQ_DATE = re.compile(r"^REQ-(?:LITE-)?(\d{8})")
+_STORY = re.compile(r"-S\d+[a-z]?$", re.I)
+# REQ-<date>-<TICKET-123>: a RETRO may carry a different slug after the ticket.
+_REQ_KEY = re.compile(r"^(REQ-(?:LITE-)?\d{8}-[A-Za-z]+-\d+)")
+
+
+def open_cycles(vault: Path, project: Path, slug: str, docs_root: str,
+                min_age_h: float = 24.0) -> list:
+    """REQ-*.md at the root of docs_root older than `min_age_h` with no RETRO
+    anywhere under docs_root and no archived cycle in the store. Age comes from
+    the REQ's date stamp when it has one (a file restored from a stash today is
+    still a 4-day-old cycle), else from its mtime."""
+    import time
+    from datetime import datetime
+    root = project / docs_root
+    if not root.is_dir():
+        return []
+    closed = {f.stem[len("RETRO-"):] for f in root.rglob("RETRO-*.md")
+              if not f.name.startswith("._") and f.name != "RETRO-LATEST.md"}
+    cyc = kc.cycles_dir(vault, slug)
+    if cyc.is_dir():
+        closed |= {d.name for d in cyc.iterdir() if d.is_dir()}
+    out = []
+    now = time.time()
+    for f in sorted(root.glob("REQ-*.md")):
+        stem = f.stem
+        if f.name.startswith("._") or _STORY.search(stem):
+            continue
+        key = _REQ_KEY.match(stem)
+        key = key.group(1) if key else stem
+        if any(c.startswith(key) or stem.startswith(c) for c in closed):
+            continue
+        m = _REQ_DATE.match(stem)
+        try:
+            ts = datetime.strptime(m.group(1), "%Y%m%d").timestamp() if m else f.stat().st_mtime
+        except (ValueError, OSError):
+            continue
+        if now - ts >= min_age_h * 3600:
+            out.append(stem)
+    return out
+
+
+def _git(project: Path, *args: str) -> "str | None":
+    try:
+        r = subprocess.run(["git", "-C", str(project), *args], capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def stashed_kuraka_state(project: Path, docs_root: str) -> list:
+    """[(stash_ref, tracked_hits, untracked_hits)] for every git stash that holds
+    Kuraka state. GitHub Desktop stashes on branch switch WITH untracked files;
+    once an uncommitted .gitignore edit is in the stash, the whole Kuraka state
+    goes with it (azure 2026-11-05..13)."""
+    refs = _git(project, "stash", "list", "--format=%gd")
+    if not refs:
+        return []
+    root = docs_root.strip("/") + "/"
+    def hit(path: str) -> bool:
+        return (path == "kuraka.config.yaml" or path.startswith(root)
+                or path.startswith(".claude/project/") or path.startswith(".claude/agents/"))
+    out = []
+    for ref in refs.split():
+        tracked = [x for x in (_git(project, "stash", "show", "--name-only", ref) or "").split("\n")
+                   if x and hit(x)]
+        untracked = [x for x in (_git(project, "ls-tree", "-r", "--name-only", f"{ref}^3") or "").split("\n")
+                     if x and hit(x) and not x.split("/")[-1].startswith("._")]
+        if tracked or untracked:
+            out.append((ref, tracked, untracked))
+    return out
+
+
+def repo_findings(vault: Path, project: Path, slug: str, docs_root: str) -> list:
+    """Checks that matter EVEN when nothing looks mounted — they explain why."""
+    findings: list = []
+    opened = open_cycles(vault, project, slug, docs_root)
+    # Phase 6.9: the user ACCEPTED but the session ended before Phase 7 — the
+    # cheapest cycle to close (only the RETRO + backup are missing).
+    accepted = [r for r in opened
+                if kc.ajustes_summary(kc.find_ajustes(r, project / docs_root / "ajustes")).get("aceptado")]
+    if accepted:
+        findings.append(F("cycles", f"{len(accepted)} ciclo(s) aceptado(s) por el usuario, falta solo la "
+                                    f"fase 7: " + ", ".join(accepted[-4:]) + (" …" if len(accepted) > 4 else ""),
+                          "manual",
+                          "corré la fase 7 (final-auditor → RETRO con `## Efectividad`) y después "
+                          f"python3 {vault}/kuraka-backup.py {project}"))
+        opened = [r for r in opened if r not in accepted]
+    if opened:
+        findings.append(F("cycles", f"{len(opened)} ciclo(s) abierto(s) sin RETRO (>24 h): "
+                                    + ", ".join(opened[-4:]) + (" …" if len(opened) > 4 else ""),
+                          "manual",
+                          "cerralo (fase 7: RETRO + kuraka-backup) o, si se abandonó, dejá una línea "
+                          "en el REQ (`Estado: abandonado — motivo`) y archivá un RETRO corto"))
+    stashes = stashed_kuraka_state(project, docs_root)
+    if stashes:
+        def _tops(paths: list) -> list:
+            return sorted({p if "/" not in p else "/".join(p.split("/")[:2]) for p in paths})
+        cmds = []
+        for ref, tracked, untracked in stashes[:3]:  # newest first (stash@{0} …)
+            if untracked:
+                cmds.append(f"git checkout {ref}^3 -- {' '.join(_tops(untracked))}")
+            if tracked:
+                cmds.append(f"git checkout {ref} -- {' '.join(_tops(tracked))}")
+        total = sum(len(t) + len(u) for _, t, u in stashes)
+        findings.append(F("stash", f"{len(stashes)} git stash(es) guardan estado Kuraka ({total} archivo(s); "
+                                   f"el más reciente: {stashes[0][0]}) — fuera del árbol, ni el backup ni "
+                                   f"el doctor lo ven",
+                          "manual",
+                          "recuperá sin tocar los stashes (copiá antes lo que tengas en esas rutas; "
+                          "el más reciente suele bastar): " + " ; ".join(cmds)))
+    d = _git(project, "diff", "HEAD", "--", ".gitignore") or ""
+    if "# Kuraka framework files" in "\n".join(l for l in d.splitlines() if l.startswith("+")):
+        findings.append(F("gitignore", ".gitignore tiene un bloque Kuraka SIN commitear — un stash "
+                                       "se lo lleva y deja de ignorar .claude/agents, el config y docs/",
+                          "manual",
+                          "descartalo (`git checkout -- .gitignore` o quitá esas líneas) y re-montá: "
+                          "los ignores viven ahora en .git/info/exclude"))
+    return findings
+
+
 def diagnose(vault: Path, project: Path, slug: str, docs_root: str) -> list:
     findings: list = []
+    if docs_root == "docs/process":
+        docs_root = kc.config_docs_root(project, docs_root)
     plats = mounted_platforms(project)
     if not plats:
-        return [F("mount", "el proyecto no tiene Kuraka montado", "remount")]
+        return [F("mount", "el proyecto no tiene Kuraka montado", "remount")] + \
+            repo_findings(vault, project, slug, docs_root)
+    findings.extend(repo_findings(vault, project, slug, docs_root))
 
     if not kc.registry_note(vault, slug).is_file():
         findings.append(F("registry", f"no está registrado en el store como «{slug}»", "register"))
@@ -204,7 +332,71 @@ def diagnose(vault: Path, project: Path, slug: str, docs_root: str) -> list:
         if n_src and n_dst < n_src:
             findings.append(F("state", f"docs/process: {n_dst} de {n_src} archivos en el store",
                               "backup"))
+
+    # Telemetry hook that captures runs but never their cost (6 projects logged
+    # 100% null total_tokens before the hook parsed structured usage).
+    hook_log = project / docs_root / "agent-telemetry" / "HOOK-LOG.jsonl"
+    if hook_log.is_file():
+        rows = []
+        for line in hook_log.read_text(encoding="utf-8", errors="ignore").splitlines()[-200:]:
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                continue
+        if len(rows) >= 3 and all(r.get("total_tokens") is None for r in rows):
+            findings.append(F("telemetry", f"HOOK-LOG.jsonl: {len(rows)} fila(s) recientes, todas con "
+                                           "total_tokens null — el hook registra la corrida pero no su costo",
+                              "manual",
+                              "re-montá con `kuraka-mount.py --update` (hook de telemetría corregido) "
+                              "y verificá que la próxima fila traiga tokens"))
+
+    # Gate commands left as placeholders: the gate hook ignores them, so the
+    # project runs with NO gate (azure FD-5/FD-17).
+    cfg = project / "kuraka.config.yaml"
+    if cfg.is_file():
+        bad = []
+        text = cfg.read_text(encoding="utf-8", errors="ignore")
+        for m in re.finditer(r"^\s*(test_cmd|lint_cmd|typecheck_cmd):[ \t]*(.*?)\s*(?:#.*)?$", text, re.M):
+            val = m.group(2).strip().strip("\"'").strip()
+            # An explicit "" is a declared "no such gate" (often with a comment
+            # saying why) — only a placeholder VALUE (TODO/TBD/<cmd>) is a finding.
+            if val and is_placeholder_gate(val):
+                bad.append(f"{m.group(1)}={val}")
+        if bad:
+            findings.append(F("gates", "comandos de gate sin definir en kuraka.config.yaml: "
+                                       + ", ".join(bad), "manual",
+                              "poné el comando real (o borrá la clave si el stack no tiene ese gate); "
+                              "un placeholder no es un gate"))
+
+    # Project instruments (own rules / scripts outside git) recorded in the store
+    # but gone from the project — guai FD-1/FD-4: 11 cycles citing missing tools.
+    primary = next((k for k in plats if (project / f".{k}" / "project").is_dir()), plats[0])
+    lost = kc.missing_instruments(project, vault, slug, platform=PLATFORM_TARGET.get(primary, "claude"))
+    if lost["scripts"]:
+        xs = lost["scripts"]
+        findings.append(F("instruments", f"{len(xs)} script(s) del proyecto (fuera de git) respaldados "
+                                         f"en el store pero ausentes: {', '.join(xs[:4])}"
+                                         + (" …" if len(xs) > 4 else ""),
+                          "instruments"))
+    if lost["rules"]:
+        xs = lost["rules"]
+        src = kc.project_dir(vault, slug) / "rules"
+        findings.append(F("instruments", f"{len(xs)} regla(s) del proyecto en el store pero ausentes en "
+                                         f".{primary}/rules/: {', '.join(xs[:4])}"
+                                         + (" …" if len(xs) > 4 else ""),
+                          "manual",
+                          f"si no las borraste a propósito: cp \"{src}\"/<regla> .{primary}/rules/ "
+                          f"(no se restauran solas: una regla retirada no debe resucitar)"))
     return findings
+
+
+_PLACEHOLDER = re.compile(r"^(?:|todo|tbd|fixme|xxx|n/?a|none|null|-+|<.*>)$", re.I)
+
+
+def is_placeholder_gate(value: str) -> bool:
+    """Same contract as hooks/gate_integrity.is_placeholder_gate."""
+    v = (value or "").strip().strip("\"'").strip()
+    return bool(_PLACEHOLDER.match(v)) or len(v) <= 2
 
 
 def repair(vault: Path, project: Path, slug: str, fixes: set) -> list:
@@ -232,6 +424,20 @@ def repair(vault: Path, project: Path, slug: str, fixes: set) -> list:
             run(str(SCRIPTS / "kuraka-backup.py"), str(project), "--name", slug,
                 "--overrides-only", "--vault", str(vault), "--target", PLATFORM_TARGET[k])
         done.append("overrides re-sincronizados con el store")
+    if "instruments" in fixes:
+        lost = kc.missing_instruments(project, vault, slug, platform=PLATFORM_TARGET.get(primary, "claude"))
+        roots = {"scripts": project / "scripts"}
+        n = 0
+        for cat in roots:  # scripts only — rules are manual (see diagnose)
+            for rel in lost[cat]:
+                src = kc.project_dir(vault, slug) / cat / rel
+                dst = roots[cat] / rel
+                if not dst.exists():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
+                    n += 1
+        if n:
+            done.append(f"{n} script(s) del proyecto restaurados desde el store")
     if "backup" in fixes:
         if run(str(SCRIPTS / "kuraka-backup.py"), str(project), "--name", slug,
                "--vault", str(vault), "--target", PLATFORM_TARGET[primary]):

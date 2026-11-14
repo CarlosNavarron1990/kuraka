@@ -119,6 +119,25 @@ def validate(routing: dict, files: dict[str, Path]) -> list[str]:
                 f"platforms.claude.{tier} = '{model}' is not a Claude Code model "
                 f"value (expected an alias {sorted(CLAUDE_ALIASES)} or a claude-* id)"
             )
+    # claude_plans: every plan resolves every tier to a Claude value, and `max`
+    # equals the authoritative claude column (the vault frontmatter) — a max
+    # mount must stay the byte-identical copy the override subsystem compares.
+    sys.path.insert(0, str(VAULT))
+    import kuraka_common as kc
+    plans = kc.load_model_routing(VAULT)["claude_plans"]
+    for plan in kc.CLAUDE_PLANS:
+        col = plans.get(plan)
+        if not col:
+            errs.append(f"claude_plans.{plan} is missing")
+            continue
+        for tier in tiers:
+            model = col.get(tier)
+            if not model:
+                errs.append(f"claude_plans.{plan} has no model for tier '{tier}'")
+            elif model not in CLAUDE_ALIASES and not model.startswith("claude-"):
+                errs.append(f"claude_plans.{plan}.{tier} = '{model}' is not a Claude Code model value")
+    if plans.get("max") and plans["max"] != platforms.get("claude"):
+        errs.append("claude_plans.max must equal platforms.claude (the vault frontmatter column)")
     # every agent -> a known tier
     for agent, tier in agents.items():
         if tier not in tiers:

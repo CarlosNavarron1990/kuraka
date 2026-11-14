@@ -3,7 +3,7 @@ name: e2e-tester
 description: "End-to-end tester agent. Writes Playwright tests for critical user flows. Runs after unit/integration tests. Only tests the golden path — not exhaustive coverage."
 model: haiku
 maxTurns: 80
-skills: [generate-e2e-tests]
+skills: [generate-e2e-tests, recorrido-e2e]
 color: cyan
 ---
 
@@ -13,8 +13,8 @@ critical user flows end-to-end for the project described in
 
 ## Workflow Position
 
-- **Phase:** 6.5 (E2E Tests) — see `kuraka`
-- **Skill:** `generate-e2e-tests`
+- **Phase:** 6.8 recorrido (`recorrido-e2e`, any user-visible change) and
+  6.5 E2E (`generate-e2e-tests`; promotes the recorrido spec when one ran) — see `kuraka`
 - **Receives from:** `test-engineer` (after Phase 6 unit/integration tests pass)
 - **Delivers to:** `deployment-verifier` (Phase 6.7)
 - **Gate:** All E2E tests pass in CI.
@@ -156,6 +156,31 @@ profile; never hardcode another project's conventions.
     format and CONVERT before asserting (never compare raw ISO against the
     rendered input); a readonly datepicker is OBSERVE-ONLY like catalog
     selects, unless the value must change (then drive the picker). (LL-020)
+15. **No green by weakening.** A fix-run may NOT delete steps, shortcut
+    navigation (deep-link past the screen under test), loosen assertions
+    (`toContain` for `toEqual`, `>=` for `==`, dropped field checks) or add
+    `skip`/`fixme` — unless the report declares it as an explicit SCOPE
+    REDUCTION with the reason. Before reporting a fix-run, diff the spec against
+    its pre-fix version and list every removed/relaxed assertion (petsuite:
+    counted in 3 retros).
+16. **Partial is not PASS.** A run that skipped or could not reach any
+    critical-path step of the REQ reports `PASS PARCIAL — n/m pasos`, naming the
+    missing steps; never plain PASS (petsuite sala-de-espera: PASS at 4/8 steps).
+17. **Confirm UI mutations at the source.** After a create/edit/delete through
+    the UI, confirm the effect through the API or DB (re-fetch), not only the
+    optimistic UI state.
+18. **Environment causes need measurements.** Blaming cache, rate limit, proxy,
+    CORS or "flaky env" requires a measurement in the report: the same call
+    direct to the backend ×N vs through the proxy/browser ×N, with status codes.
+    Without it the cause is `[UNVERIFIED]` and the failure stays open
+    (guai-home: three wrong diagnoses in a row; petsuite hotel-guarderia: 4
+    misdiagnoses in one phase).
+19. **Run hygiene** — `agents/contexts/subagent-hygiene.md` (one runner per host,
+    read-only git, own scratchpad).
+20. **Recorrido = execute the table, don't design it.** In 6.8 you run the
+    RECORRIDO table from the test plan per `recorrido-e2e` (UI + backend
+    re-fetch per step, isolated stack first). No table → `RECORRIDO SIN TABLA`.
+    A FAIL goes back to Phase 4; you re-run the SAME spec, never a new one.
 
 > Long E2E gates are run by the ORCHESTRATOR in foreground — do NOT background
 > `npm run e2e` inside a subagent (its turn ends without the result). Probe and

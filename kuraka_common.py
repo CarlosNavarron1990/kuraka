@@ -255,6 +255,7 @@ CLAUDE_ONLY_FRONTMATTER_KEYS = {
     "initialprompt",
     # skill frontmatter keys (Claude Code SKILL.md contract)
     "disable-model-invocation", "user-invocable", "context",
+    "allowed-tools", "disallowed-tools",
 }
 
 
@@ -360,11 +361,138 @@ def adapt_codex_paths(text: str) -> str:
         'kuraka-backup.py" <project-root> --layer-root .codex/project --skip-overrides',
     )
     for name in ("checkmarx-remediation", "kuraka-wizard", "kuraka-backup",
-                 "kuraka-update", "kuraka", "amauta", "inti", "arki"):
+                 "kuraka-update", "kuraka-ahorro", "kuraka", "amauta", "inti",
+                 "arki"):
         text = text.replace(f"/prompts:{name}", f"${name}")
         text = re.sub(rf"(?<![A-Za-z0-9_.$/])/{re.escape(name)}(?![A-Za-z0-9_.-])",
                       f"${name}", text)
     return text
+
+
+# --- Claude account plan (model routing per subscription) ---------------------
+# MODEL-ROUTING.yaml `claude_plans:` maps each Claude subscription to a
+# tier -> model column. The VAULT frontmatter is always the `max` column (=
+# platforms.claude, applied by kuraka-apply-models.py), so a `max` mount stays
+# the byte-identical copy the override subsystem relies on. Any other plan is a
+# RENDER that rewrites only the agent `model:` line — done inside
+# render_for_platform, the same function the mount manifest hashes, so a
+# pro/team mount does not read as 24 project overrides. The active plan of a
+# project is recorded in its mount manifest (`claude_plan`) and re-read by
+# detect_overrides / every later --update, so it is chosen once per project.
+
+CLAUDE_PLANS = ("max", "pro", "team")
+DEFAULT_CLAUDE_PLAN = "max"
+_CLAUDE_PLAN: "str | None" = None
+_ROUTING_CACHE: dict = {}
+
+
+def normalize_claude_plan(plan: "str | None") -> "str | None":
+    """'max'/'pro'/'team' (aliases: promax, max5, max20, teams, 20); None if unknown."""
+    if not plan:
+        return None
+    v = str(plan).strip().lower().replace(" ", "").replace("-", "").replace("_", "")
+    aliases = {"max": "max", "promax": "max", "max5": "max", "max20": "max",
+               "pro": "pro", "20": "pro", "20usd": "pro",
+               "team": "team", "teams": "team"}
+    return aliases.get(v)
+
+
+def set_claude_plan(plan: "str | None") -> str:
+    """Set the plan claude renders use in this process; returns the effective plan."""
+    global _CLAUDE_PLAN
+    _CLAUDE_PLAN = normalize_claude_plan(plan) or DEFAULT_CLAUDE_PLAN
+    return _CLAUDE_PLAN
+
+
+def active_claude_plan() -> str:
+    return _CLAUDE_PLAN or DEFAULT_CLAUDE_PLAN
+
+
+def load_model_routing(vault: Path) -> dict:
+    """Parse MODEL-ROUTING.yaml (fixed shape, no PyYAML): tiers, platforms,
+    claude_plans (one nested level each) and agents."""
+    path = vault / "MODEL-ROUTING.yaml"
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return {"tiers": {}, "platforms": {}, "claude_plans": {}, "agents": {}}
+    key = (str(path), mtime)
+    if key in _ROUTING_CACHE:
+        return _ROUTING_CACHE[key]
+    out: dict = {"tiers": {}, "platforms": {}, "claude_plans": {}, "agents": {}}
+    section, sub = None, None
+    for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        line = raw.strip().split(" #", 1)[0].strip()
+        if ":" not in line:
+            continue
+        k, _, v = line.partition(":")
+        k, v = k.strip(), v.strip().strip('"').strip("'")
+        if indent == 0:
+            section = k if k in out else None
+            sub = None
+            continue
+        if section in ("tiers", "agents"):
+            out[section][k] = v
+        elif section in ("platforms", "claude_plans"):
+            if indent == 2:
+                sub = k
+                out[section][sub] = {}
+            elif indent >= 4 and sub is not None:
+                out[section][sub][k] = v
+    _ROUTING_CACHE.clear()
+    _ROUTING_CACHE[key] = out
+    return out
+
+
+def claude_plan_models(vault: Path, plan: "str | None" = None) -> dict:
+    """tier -> Claude model for `plan` (falls back to platforms.claude)."""
+    r = load_model_routing(vault)
+    plan = normalize_claude_plan(plan) or active_claude_plan()
+    return dict(r["claude_plans"].get(plan) or r["platforms"].get("claude") or {})
+
+
+def claude_plan_is_identity(vault: Path, plan: "str | None" = None) -> bool:
+    """True when `plan` renders agents exactly as the vault stores them."""
+    r = load_model_routing(vault)
+    base = r["platforms"].get("claude") or {}
+    return claude_plan_models(vault, plan) == base
+
+
+_FM_MODEL_RE = re.compile(r"^(model:[ \t]*)(\S.*?)[ \t]*$", re.M)
+
+
+def apply_claude_plan(text: str, vault: Path, plan: "str | None" = None) -> str:
+    """Rewrite an AGENT's frontmatter `model:` to its tier's model for `plan`.
+    Non-agent files (skills, commands, contexts) and agents without a tier
+    are returned untouched."""
+    if claude_plan_is_identity(vault, plan) or not text.startswith("---"):
+        return text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text
+    head = text[:end]
+    m = re.search(r"^name:[ \t]*(\S+)", head, re.M)
+    if not m:
+        return text
+    r = load_model_routing(vault)
+    tier = r["agents"].get(m.group(1).strip().strip('"').strip("'"))
+    model = claude_plan_models(vault, plan).get(tier or "")
+    if not tier or not model:
+        return text
+    new_head, n = _FM_MODEL_RE.subn(lambda mm: mm.group(1) + model, head, count=1)
+    return new_head + text[end:] if n else text
+
+
+def manifest_claude_plan(project: Path) -> "str | None":
+    """Plan recorded by the last claude mount of `project` (None if never)."""
+    p = project / ".claude" / MOUNT_MANIFEST_NAME
+    try:
+        return normalize_claude_plan(json.loads(p.read_text(encoding="utf-8")).get("claude_plan"))
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return None
 
 
 def render_for_platform(text: str, platform: str, vault: Path) -> str:
@@ -375,7 +503,7 @@ def render_for_platform(text: str, platform: str, vault: Path) -> str:
     manual discipline prose, and applies its path projection."""
     plat = platform_key(platform)
     if plat == "claude":
-        return text
+        return apply_claude_plan(text, vault)  # identity on the `max` plan
     text = strip_claude_frontmatter(text)
     text = expand_discipline(text, vault)
     if plat == "agents":
@@ -402,13 +530,63 @@ def split_frontmatter(text: str) -> "tuple[dict[str, str], str]":
 
 
 CODEX_SKILL_PLATFORM_OVERRIDE_FOR = {"kuraka", "kuraka-policies"}
+# Skills that are NOT mounted on every platform, and skill ASSETS bundled only
+# for some. Ultra Ahorro ships wherever the mode has an enforceable contract:
+# Claude gets the skill (its frontmatter carries model/effort/disallowed-tools
+# and the orchestrator_guard hook binds the declared scope to the session) and
+# Codex gets the skill plus its bundled evidence helper (no hooks there, so the
+# helper is the only way to keep scope/check evidence). Cursor and Antigravity
+# have neither mechanism yet, so they do not receive the mode at all.
+SKILL_PLATFORMS = {"kuraka-ahorro": {"claude", "codex"},
+                   # validar-pr drives a blind `claude -p` reviewer and its gate is the
+                   # Claude-only pr_gate hook: no enforceable contract elsewhere yet.
+                   "validar-pr": {"claude"}}
+SKILL_ASSET_PLATFORMS = {("kuraka-ahorro", "scripts"): {"codex"}}
+
+
+def skill_mounted_on(name: str, platform: str) -> bool:
+    """Whether the vault skill `name` is mounted for `platform` at all."""
+    allowed = SKILL_PLATFORMS.get(name)
+    return allowed is None or platform_key(platform) in allowed
+
+
+def skill_asset_excludes(skill: str, platform: str) -> tuple[str, ...]:
+    """Subdirectories of the vault skill DIRECTORY `skill` that `platform` does
+    not receive. Keeps a platform-specific bundle — the Codex evidence helper —
+    out of the mounts that do not use it."""
+    key = platform_key(platform)
+    return tuple(top for (owner, top), allowed in SKILL_ASSET_PLATFORMS.items()
+                 if owner == skill and key not in allowed)
+
+_CODEX_KURAKA_ROUTER = """# Kuraka — select the workflow
+
+Read the user's requirement and `kuraka.config.yaml` before loading a pipeline.
+An explicit mode wins. Otherwise use `workflow.codex_default_mode` when present,
+falling back to `workflow.default_mode`. Missing config requires onboarding.
+
+- For `ultra-ahorro`, read `.codex/skills/kuraka-ahorro/SKILL.md` and execute
+  directly in this session with zero subagents. Do not read the full workflow,
+  modes, policies or historical token rules first.
+- For other modes, read `references/workflow.md` next to this skill, then the
+  mode/policy documents it requires. Keep the established delegated workflow.
+- With no explicit/default mode, offer Ultra Ahorro for a clearly local,
+  low-risk task; otherwise use the regular mode selection.
+
+`$kuraka-ahorro <task>` is the direct entry. `$kuraka <task> --modo ultra-ahorro`
+selects the same mode. An already selected mode needs no repeated confirmation.
+Never silently escalate Ultra Ahorro into specialist work: explain the trigger
+and get the user's choice first. Keep unrelated user work intact.
+"""
 
 _CODEX_SKILL_PLATFORM_OVERRIDE = """## Codex Platform Override
 
 This override takes precedence over Claude-specific wording below. When the
 workflow says to invoke an agent, delegate to the matching native custom agent
 in `.codex/agents/<name>.toml`, wait for its structured handoff, and apply the
-gate before the next phase. The orchestrator never adopts a specialist role.
+gate before the next phase. The orchestrator never adopts a specialist role
+in the delegated modes. Ultra Ahorro is the explicit exception: follow
+`.codex/skills/kuraka-ahorro/SKILL.md`, implement and verify in the main session,
+and do not invoke agents or the phase pipeline below.
 
 Codex may not expose Claude's `<usage>` block. Keep the telemetry file and
 record phase, agent, attempt, timestamps, status, and produced artifacts.
@@ -418,11 +596,20 @@ never fabricate `0`. Missing optional usage metrics do not block a gate.
 """
 
 
-def codex_skill_text(name: str, description: str, body: str, source_kind: str) -> str:
+def codex_skill_text(name: str, description: str, body: str, source_kind: str,
+                     vault: "Path | None" = None) -> str:
     """Render a Codex-native SKILL.md. Codex discovers project-local skills only
     from .codex/skills/<name>/SKILL.md, so vault skills and Kuraka agents are
-    normalized into that shape for the Codex target."""
+    normalized into that shape for the Codex target.
+
+    `vault` re-expands the `<!-- kuraka:discipline:<name> -->` markers, exactly
+    as render_for_platform does for every other non-Claude render: this
+    projection is a rebuild rather than a copy, so without it Codex was the one
+    platform that received the raw marker instead of the manual prose."""
     description = adapt_codex_paths(description)
+    body = _CODEX_KURAKA_ROUTER if name == "kuraka" else body
+    if vault is not None:
+        body = expand_discipline(body, vault)
     body = adapt_codex_paths(body)
     override = (_CODEX_SKILL_PLATFORM_OVERRIDE
                 if name in CODEX_SKILL_PLATFORM_OVERRIDE_FOR else "")
@@ -450,7 +637,7 @@ def render_vault_content(text: str, platform: str, vault: Path,
         fm, body = split_frontmatter(text)
         name = fm.get("name") or vault_rel.stem
         desc = fm.get("description") or f"Kuraka workflow skill: {name}"
-        return codex_skill_text(name, desc, body, "skill")
+        return codex_skill_text(name, desc, body, "skill", vault)
     return render_for_platform(text, platform, vault)
 
 
@@ -458,7 +645,10 @@ def _render_hash(data: bytes, platform: str, vault: Path,
                  cat: str | None = None, vault_rel: "Path | None" = None) -> str:
     """sha256 of `data` as the mount would write it (identity for claude)."""
     if platform_key(platform) == "claude":
-        return hashlib.sha256(data).hexdigest()
+        if claude_plan_is_identity(vault):
+            return hashlib.sha256(data).hexdigest()
+        return hashlib.sha256(apply_claude_plan(
+            data.decode("utf-8", errors="ignore"), vault).encode("utf-8")).hexdigest()
     # errors="ignore" mirrors kuraka-mount.copy_file's own read of the source.
     rendered = render_vault_content(data.decode("utf-8", errors="ignore"),
                                     platform, vault, cat, vault_rel)
@@ -522,6 +712,52 @@ def load_mount_manifest(project: Path, platform: str = "claude") -> dict[str, st
     return {str(k): str(v) for k, v in files.items()}
 
 
+# --- Coexistence: files the PROJECT versions are project-owned ----------------
+# A project may commit its own .claude/ material (azure versions .claude/rules,
+# CLAUDE.md, settings.json and a whole .claude/skills/validar-pr/ in git). Kuraka
+# never overwrites, deletes, baselines or snapshots a file the project tracks:
+# git already preserves it, and a mount that rewrites it shows up as a team
+# change (or gets swept into a stash). A tracked file inside a skill directory
+# makes the WHOLE skill name project-owned, so the project's version is the one
+# Claude registers.
+
+def git_tracked_files(project: Path) -> "set[str]":
+    """Posix paths (relative to `project`) tracked in git; empty if not a repo."""
+    try:
+        r = subprocess.run(["git", "-C", str(project), "ls-files", "-z"],
+                           capture_output=True, check=False, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if r.returncode != 0:
+        return set()
+    return {x for x in r.stdout.decode("utf-8", "replace").split("\0") if x}
+
+
+def project_owned_skills(tracked: "set[str]", p_name: str) -> "set[str]":
+    """Skill names the project versions under <p_name>/skills/ (dir or flat)."""
+    prefix = f"{p_name.strip('/')}/skills/"
+    owned = set()
+    for t in tracked:
+        if t.startswith(prefix):
+            rest = t[len(prefix):]
+            if "/" in rest:
+                owned.add(rest.split("/", 1)[0])
+            elif rest.endswith(".md"):
+                owned.add(rest[:-3])
+    return owned
+
+
+def is_project_owned(rel_key: str, p_name: str, tracked: "set[str]",
+                     owned_skills: "set[str]") -> bool:
+    """rel_key = '<cat>/<rel>' under the platform dir."""
+    if f"{p_name.strip('/')}/{rel_key}" in tracked:
+        return True
+    if rel_key.startswith("skills/"):
+        first = rel_key[len("skills/"):].split("/", 1)[0]
+        return first.removesuffix(".md") in owned_skills
+    return False
+
+
 def write_mount_manifest(project: Path, vault: Path,
                          categories: tuple[str, ...] = OVERRIDE_CATEGORIES,
                          platform: str = "claude") -> int:
@@ -536,6 +772,9 @@ def write_mount_manifest(project: Path, vault: Path,
     made every non-Claude mounted file look edited."""
     manifest = load_mount_manifest(project, platform)
     count = 0
+    p_dir = platform_dirname(platform)
+    tracked = git_tracked_files(project)
+    owned = project_owned_skills(tracked, p_dir)
     for cat in categories:
         src = vault / cat
         if not src.is_dir():
@@ -545,15 +784,32 @@ def write_mount_manifest(project: Path, vault: Path,
             if p.name.endswith(".append.md") or p.name.startswith("._"):
                 continue
             rel = p.relative_to(src)
+            if cat == "skills" and not skill_mounted_on(
+                    rel.parts[0].removesuffix(".md"), platform):
+                continue
             key = (Path(cat) / rel).as_posix()
+            if is_project_owned(key, p_dir, tracked, owned):
+                continue  # project-owned (versioned): the mount never wrote it
             manifest[key] = _render_hash(p.read_bytes(), platform, vault, cat, rel)
             count += 1
+        if cat == "skills" and platform_key(platform) == "codex":
+            source = src / "kuraka.md"
+            if source.is_file():
+                _, body = split_frontmatter(source.read_text(encoding="utf-8"))
+                rendered = render_for_platform(body, "codex", vault)
+                manifest["skills/kuraka/references/workflow.md"] = hashlib.sha256(
+                    rendered.encode("utf-8")).hexdigest()
+                count += 1
     p_name = platform_dirname(platform)
     out = project / p_name / MOUNT_MANIFEST_NAME
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps({"suite_version": suite_version(vault),
-                               "platform": platform_key(platform),
-                               "files": manifest}, indent=1, sort_keys=True) + "\n",
+    payload = {"suite_version": suite_version(vault),
+               "platform": platform_key(platform),
+               "files": manifest}
+    if platform_key(platform) == "claude":
+        payload["claude_plan"] = active_claude_plan()
+        payload["claude_plan_models"] = claude_plan_models(vault)
+    out.write_text(json.dumps(payload, indent=1, sort_keys=True) + "\n",
                    encoding="utf-8")
     return count
 
@@ -590,6 +846,7 @@ def _matches_vault_history(vault: Path, rel: str, file_hash: str,
     except OSError:
         return False
     non_claude = platform_key(platform) != "claude"
+    plan_render = not non_claude and not claude_plan_is_identity(vault)
     for c in commits:
         r = subprocess.run(["git", "show", f"{c}:{rel}"],
                            capture_output=True, cwd=vault, check=False)
@@ -600,8 +857,8 @@ def _matches_vault_history(vault: Path, rel: str, file_hash: str,
         if norm_hash is not None and hashlib.sha256(
                 _normalize_legacy_format(r.stdout)).hexdigest() == norm_hash:
             return True
-        if non_claude and _render_hash(r.stdout, platform, vault,
-                                       cat, vault_rel) == file_hash:
+        if (non_claude or plan_render) and _render_hash(
+                r.stdout, platform, vault, cat, vault_rel) == file_hash:
             return True
     return False
 
@@ -646,10 +903,28 @@ def detect_overrides(project: Path, vault: Path, platform: str = "claude") -> li
     """Relative paths (as `<cat>/<rel>`) under platform/<cat>/ whose content differs
     from the vault baseline, or that don't exist in the vault at all (custom
     files). These are the project-specific tunings worth preserving."""
+    if platform_key(platform) == "claude":
+        # Compare against the render of the plan this project was MOUNTED with
+        # (a pro/team mount rewrites agent model: lines — not a tuning).
+        prev = _CLAUDE_PLAN
+        set_claude_plan(manifest_claude_plan(project))
+        try:
+            return _detect_overrides(project, vault, platform)
+        finally:
+            globals()["_CLAUDE_PLAN"] = prev
+    return _detect_overrides(project, vault, platform)
+
+
+def _detect_overrides(project: Path, vault: Path, platform: str) -> list[Path]:
     out: list[Path] = []
     manifest = load_mount_manifest(project, platform)
     p_name = platform_dirname(platform)
+    # Versioned files are the project's own: its git keeps them, so they are
+    # never snapshotted as overrides (nor re-applied over the project's copy).
+    tracked = git_tracked_files(project)
+    owned = project_owned_skills(tracked, p_name)
     non_claude = platform_key(platform) != "claude"
+    plan_render = not non_claude and not claude_plan_is_identity(vault)
     for cat in OVERRIDE_CATEGORIES:
         proj_cat = project / p_name / cat
         vault_cat = vault / cat
@@ -659,6 +934,8 @@ def detect_overrides(project: Path, vault: Path, platform: str = "claude") -> li
             if p.name.endswith(".append.md") or p.name.startswith("._"):
                 continue  # ._* = macOS AppleDouble metadata, never an override
             rel = p.relative_to(proj_cat)
+            if is_project_owned((Path(cat) / rel).as_posix(), p_name, tracked, owned):
+                continue
             canon = _skill_dir_canonical(cat, rel)
             # A project skills/<n>/SKILL.md may come from EITHER the vault's
             # directory skill (skills/<n>/SKILL.md) or the flat transition copy
@@ -680,12 +957,19 @@ def detect_overrides(project: Path, vault: Path, platform: str = "claude") -> li
                 if hashlib.sha256(base_bytes).hexdigest() in proj_hashes:
                     matched = True  # identical to current vault (claude render)
                     break
-                if non_claude and _render_hash(
+                if (non_claude or plan_render) and _render_hash(
                         base_bytes, platform, vault, cat, vr) in proj_hashes:
                     matched = True  # identical to this platform's current render
                     break
             if matched:
                 continue
+            if (platform_key(platform) == "codex" and cat == "skills"
+                    and rel == Path("kuraka/references/workflow.md")
+                    and (vault_cat / "kuraka.md").is_file()):
+                _, body = split_frontmatter((vault_cat / "kuraka.md").read_text(encoding="utf-8"))
+                expected = render_for_platform(body, "codex", vault).encode("utf-8")
+                if hashlib.sha256(expected).hexdigest() in proj_hashes:
+                    continue
             if _is_codex_command_skill(platform, cat, rel, proj_bytes, vault):
                 continue  # mount artifact: a vault COMMAND published as a Codex
                           # skill by kuraka-export, not a project tuning
@@ -775,7 +1059,8 @@ def snapshot_overrides(project: Path, vault: Path, slug: str, platform: str = "c
     return len(rels)
 
 
-def restore_overrides(vault: Path, slug: str, project: Path, platform: str = "claude") -> int:
+def restore_overrides(vault: Path, slug: str, project: Path, platform: str = "claude",
+                      skipped: "list | None" = None) -> int:
     """Re-apply snapshotted overrides on top of freshly-mounted vault copy.
 
     Reads ONLY this platform's store — pasting an Antigravity render into a
@@ -787,6 +1072,8 @@ def restore_overrides(vault: Path, slug: str, project: Path, platform: str = "cl
         return 0
     copied = 0
     p_name = platform_dirname(platform)
+    tracked = git_tracked_files(project)
+    owned = project_owned_skills(tracked, p_name)
     for cat in OVERRIDE_CATEGORIES:
         src_cat = src_root / cat
         if not src_cat.is_dir():
@@ -796,15 +1083,21 @@ def restore_overrides(vault: Path, slug: str, project: Path, platform: str = "cl
                 continue
             rel = s.relative_to(src_cat)
             d = project / p_name / cat / rel
+            if is_project_owned((Path(cat) / rel).as_posix(), p_name, tracked, owned):
+                # The project versions this path: never paste a stored copy over
+                # it (an old snapshot would silently revert the team's commits).
+                if not (d.is_file() and d.read_bytes() == s.read_bytes()) and skipped is not None:
+                    skipped.append(f"{p_name}/{cat}/{rel.as_posix()}")
+                continue
             d.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(s, d)
             copied += 1
     if platform_key(platform) == "claude":
-        copied += _mirror_claude_skill_copies(project / p_name / "skills")
+        copied += _mirror_claude_skill_copies(project / p_name / "skills", owned)
     return copied
 
 
-def _mirror_claude_skill_copies(skills_root: Path) -> int:
+def _mirror_claude_skill_copies(skills_root: Path, owned: "set[str] | None" = None) -> int:
     """Keep the two claude skill copies coherent after a restore: the
     registered directory form (skills/<n>/SKILL.md) is the source of truth;
     when it differs from the transition flat copy (skills/<n>.md), the flat
@@ -814,7 +1107,7 @@ def _mirror_claude_skill_copies(skills_root: Path) -> int:
     fixed = 0
     for d in sorted(skills_root.iterdir()):
         sm = d / "SKILL.md"
-        if not (d.is_dir() and sm.is_file()):
+        if not (d.is_dir() and sm.is_file()) or (owned and d.name in owned):
             continue
         flat = skills_root / f"{d.name}.md"
         if flat.exists() and flat.read_bytes() != sm.read_bytes():
@@ -842,6 +1135,41 @@ def snapshot_tree(src: Path, dst: Path) -> int:
         n += 1
     return n
 
+
+def snapshot_tree_incremental(src: Path, dst: Path) -> int:
+    """Like snapshot_tree, but copies only files that are missing or changed
+    (size/mtime pre-check, then bytes) — cheap enough to run from a hook after
+    every subagent. Never deletes anything in dst. Returns files copied."""
+    if not src.is_dir():
+        return 0
+    n = 0
+    for s in src.rglob("*"):
+        if s.is_dir() or s.name.startswith("._"):
+            continue
+        d = dst / s.relative_to(src)
+        try:
+            if d.is_file():
+                ss, ds = s.stat(), d.stat()
+                if ss.st_size == ds.st_size and (int(ss.st_mtime) == int(ds.st_mtime)
+                                                 or s.read_bytes() == d.read_bytes()):
+                    continue
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(s, d)
+            n += 1
+        except OSError:
+            continue
+    return n
+
+
+def config_docs_root(project: Path, default: str = "docs/process") -> str:
+    """architecture.paths.docs_process_root from kuraka.config.yaml (or default)."""
+    cfg = project / "kuraka.config.yaml"
+    try:
+        text = cfg.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return default
+    m = re.search(r"^\s*docs_process_root:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$", text, re.M)
+    return (m.group(1).strip().strip("/") if m else default) or default
 
 def find_verdict(retro_text: str) -> str:
     for pat in (r"##\s*Confidence:\s*(.+)", r"Confidence:\s*(\w+)", r"Verdict:\s*(.+)"):
@@ -955,6 +1283,261 @@ def _refresh_verdict(dest: Path, retro: Path) -> bool:
     return True
 
 
+def _sha(path: Path) -> str:
+    import hashlib
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _refresh_changed_cycle(dest: Path, req: str, telem_dirs: list[Path],
+                           retro: Path) -> bool:
+    """Re-copy an archived cycle's RETRO (and its telemetry file) when the source
+    content changed since archiving; re-derive the verdict from the new text.
+    Returns True if anything was updated. Never deletes."""
+    changed = False
+    archived = dest / retro.name
+    if not archived.is_file() or _sha(archived) != _sha(retro):
+        shutil.copy2(retro, archived)
+        changed = True
+        meta = dest / "meta.yaml"
+        if meta.is_file():
+            verdict = find_verdict(retro.read_text(encoding="utf-8", errors="ignore"))
+            text = meta.read_text(encoding="utf-8", errors="ignore")
+            new = re.sub(r'^verdict: ".*"$', f'verdict: "{verdict}"', text, flags=re.M)
+            if new != text:
+                meta.write_text(new, encoding="utf-8")
+    telem = _find_telemetry(req, telem_dirs, retro)
+    if telem is not None:
+        arch_t = dest / telem.name
+        if arch_t.is_file() and _sha(arch_t) != _sha(telem):
+            shutil.copy2(telem, arch_t)
+            changed = True
+    return changed
+
+
+# --- project instruments (rules/scripts the project owns, outside git) -------
+
+# Rules the vault mounts (kuraka-mount.py). Anything else under <platform>/rules/
+# is project-owned: written by a RETRO or seeded by the team. <platform>/ is
+# gitignored, so a branch switch or re-clone lost them (guai FD-1/FD-4: 11
+# cycles citing instruments that no longer existed).
+FRAMEWORK_RULES = frozenset({
+    "16-agent-backup.md", "17-kuraka-token-optimizations.md",
+    "18-duplication-aware-refactor.md", "19-evidence.md",
+    "20-esquema-real-en-tests.md", "21-gates-vivos.md", "22-el-error-viaja-entero.md", "23-mutaciones-con-registro.md",
+})
+
+
+def _git_tracked(project: Path, rel_dir: str) -> set[str]:
+    try:
+        out = subprocess.run(["git", "-C", str(project), "ls-files", "--", rel_dir],
+                             capture_output=True, text=True, timeout=20)
+        return set(out.stdout.split()) if out.returncode == 0 else set()
+    except Exception:
+        return set()
+
+
+def project_instruments(project: Path, platform: str = "claude") -> dict[str, list[Path]]:
+    """Project-owned instruments that git does NOT protect:
+      rules   — <platform>/rules/*.md not mounted by the vault
+      scripts — files under <project>/scripts/ that are not git-tracked
+    Returns {"rules": [...], "scripts": [...]} of absolute paths."""
+    out: dict[str, list[Path]] = {"rules": [], "scripts": []}
+    rdir = project / platform_dirname(platform) / "rules"
+    if rdir.is_dir():
+        out["rules"] = sorted(p for p in rdir.glob("*.md")
+                              if p.name not in FRAMEWORK_RULES and not p.name.startswith("._"))
+    sdir = project / "scripts"
+    if sdir.is_dir():
+        tracked = _git_tracked(project, "scripts")
+        for p in sorted(sdir.rglob("*")):
+            if p.is_file() and not p.name.startswith("._") \
+                    and str(p.relative_to(project)) not in tracked:
+                out["scripts"].append(p)
+    return out
+
+
+def snapshot_instruments(project: Path, vault: Path, slug: str,
+                         platform: str = "claude") -> dict[str, int]:
+    """Copy project instruments into <vault>/projects/<slug>/{rules,scripts}/.
+    Additive (never deletes a stored instrument: a missing one in the project is
+    exactly what kuraka-doctor must be able to report and restore)."""
+    found = project_instruments(project, platform)
+    counts = {}
+    base = project_dir(vault, slug)
+    for cat, files in found.items():
+        root = (project / platform_dirname(platform) / "rules") if cat == "rules" else (project / "scripts")
+        n = 0
+        for f in files:
+            d = base / cat / f.relative_to(root)
+            d.parent.mkdir(parents=True, exist_ok=True)
+            if not d.is_file() or _sha(d) != _sha(f):
+                shutil.copy2(f, d)
+            n += 1
+        counts[cat] = n
+    return counts
+
+
+def missing_instruments(project: Path, vault: Path, slug: str,
+                        platform: str = "claude") -> dict[str, list[str]]:
+    """Instruments stored for this project that no longer exist in it."""
+    base = project_dir(vault, slug)
+    out: dict[str, list[str]] = {"rules": [], "scripts": []}
+    targets = {"rules": project / platform_dirname(platform) / "rules",
+               "scripts": project / "scripts"}
+    for cat, proot in targets.items():
+        sroot = base / cat
+        if not sroot.is_dir():
+            continue
+        for f in sorted(sroot.rglob("*")):
+            if not f.is_file() or f.name.startswith("._"):
+                continue
+            rel = f.relative_to(sroot)
+            if cat == "rules" and rel.name in FRAMEWORK_RULES:
+                continue
+            if not (proot / rel).exists():
+                out[cat].append(str(rel))
+    return out
+
+
+# --- Cycle effectiveness: user-validation ledger (kuraka-ajuste.py) ----------
+# Phase 6.9 records every adjustment the user asks for, VERBATIM, against the
+# running cycle in `<docs_process_root>/ajustes/AJUSTES-<REQ>.jsonl` (append-only
+# events: add / ronda / resolver / aceptar / cerrar). These helpers are the one
+# reader shared by the CLI, archive_cycles (meta.yaml), the doctor and the
+# telemetry dashboard, so the effectiveness numbers can never disagree.
+
+AJUSTE_TIPOS = ("bug", "ux", "cambio-alcance", "falto-preguntar", "falto-hacer", "entorno")
+AJUSTE_FALTO = ("falto-preguntar", "falto-hacer")
+
+
+def ajustes_dir(project: Path) -> Path:
+    return project / config_docs_root(project) / "ajustes"
+
+
+def _req_key(name: str) -> str:
+    """REQ-YYYYMMDD-TICKET prefix used to pair a shortened ledger name with
+    the full REQ/RETRO stem (REQ-20261110-GUAI-3141-agenda-… -> REQ-20261110-GUAI-3141)."""
+    m = re.match(r"(REQ(?:-LITE)?-\d{8}-[A-Za-z]+-\d+|REQ(?:-LITE)?-\d{8})", name)
+    return m.group(1) if m else name
+
+
+def find_ajustes(req: str, directory: Path) -> "Path | None":
+    """AJUSTES-<REQ>.jsonl for `req` in `directory`: exact name first, then one
+    whose REQ is a prefix of the other, then the same REQ-date-ticket key."""
+    if not directory.is_dir():
+        return None
+    exact = directory / f"AJUSTES-{req}.jsonl"
+    if exact.is_file():
+        return exact
+    cands = sorted(p for p in directory.glob("AJUSTES-*.jsonl") if not p.name.startswith("._"))
+    for p in cands:
+        other = p.stem[len("AJUSTES-"):]
+        if req.startswith(other) or other.startswith(req):
+            return p
+    key = _req_key(req)
+    for p in cands:
+        if _req_key(p.stem[len("AJUSTES-"):]) == key:
+            return p
+    return None
+
+
+def read_ajustes_events(path: Path) -> list[dict]:
+    out: list[dict] = []
+    try:
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(ev, dict):
+            out.append(ev)
+    return out
+
+
+def ajustes_summary(path: "Path | None") -> dict:
+    """Effectiveness summary of a ledger (or `sin-registro` when there is none)."""
+    if path is None or not Path(path).is_file():
+        return {"registro": False, "aceptacion": "sin-registro", "rondas": 0,
+                "ajustes_total": 0, "ajustes_falto": 0, "pendientes": 0,
+                "aceptado": False, "por_tipo": {}, "por_debio": {}, "ajustes": []}
+    events = read_ajustes_events(Path(path))
+    ronda = 1
+    ajustes: dict[int, dict] = {}
+    aceptado = None
+    cierre = None
+    for ev in events:
+        kind = ev.get("ev")
+        if kind == "ronda":
+            ronda = int(ev.get("ronda") or ronda + 1)
+        elif kind == "add":
+            a = dict(ev)
+            a.setdefault("ronda", ronda)
+            ajustes[int(ev.get("id", len(ajustes) + 1))] = a
+        elif kind == "resolver":
+            a = ajustes.get(int(ev.get("id", -1)))
+            if a is not None:
+                a["resolucion"] = ev.get("resolucion")
+                a["resuelto_ts"] = ev.get("ts")
+        elif kind == "aceptar":
+            aceptado = ev
+        elif kind == "cerrar":
+            cierre = ev
+    items = [ajustes[k] for k in sorted(ajustes)]
+    total = len(items)
+    falto = sum(1 for a in items if a.get("tipo") in AJUSTE_FALTO)
+    pend = sum(1 for a in items if not a.get("resolucion"))
+    por_tipo: dict[str, int] = {}
+    por_debio: dict[str, int] = {}
+    for a in items:
+        por_tipo[a.get("tipo", "?")] = por_tipo.get(a.get("tipo", "?"), 0) + 1
+        d = a.get("debio") or "?"
+        por_debio[d] = por_debio.get(d, 0) + 1
+    if aceptado:
+        label = "primera-ronda" if total == 0 else f"tras-{max(ronda, 2)}-rondas"
+    else:
+        label = "sin-aceptacion"
+    return {"registro": True, "aceptacion": label, "rondas": ronda,
+            "ajustes_total": total, "ajustes_falto": falto, "pendientes": pend,
+            "aceptado": bool(aceptado), "aceptado_ts": (aceptado or {}).get("ts"),
+            "nota": (aceptado or {}).get("nota"),
+            "cierre_sin_aceptacion": (cierre or {}).get("motivo") if not aceptado else None,
+            "por_tipo": por_tipo, "por_debio": por_debio, "ajustes": items}
+
+
+def _attach_ajustes(dest: Path, req: str, project: Path, docs_root: str) -> bool:
+    """Copy the cycle's AJUSTES ledger (+ its .md) into the archived cycle and
+    stamp the effectiveness fields into meta.yaml. Idempotent; True if changed."""
+    src = find_ajustes(req, project / docs_root / "ajustes")
+    changed = False
+    if src is not None:
+        for f in (src, src.with_suffix(".md")):
+            if f.is_file():
+                tgt = dest / f.name
+                if not tgt.is_file() or tgt.read_bytes() != f.read_bytes():
+                    shutil.copy2(f, tgt)
+                    changed = True
+    summ = ajustes_summary(src)
+    meta_p = dest / "meta.yaml"
+    if meta_p.is_file():
+        text = meta_p.read_text(encoding="utf-8", errors="ignore")
+        lines = [l for l in text.splitlines()
+                 if not l.startswith(("aceptacion:", "ajustes_total:", "ajustes_falto:"))]
+        lines += [f'aceptacion: "{summ["aceptacion"]}"',
+                  f'ajustes_total: {summ["ajustes_total"]}',
+                  f'ajustes_falto: {summ["ajustes_falto"]}']
+        new = "\n".join(lines) + "\n"
+        if new != text:
+            meta_p.write_text(new, encoding="utf-8")
+            changed = True
+    return changed
+
+
 def archive_cycles(project: Path, vault: Path, slug: str, branch: str,
                    docs_root: str, force: bool) -> list[dict]:
     """Copy each cycle's RETRO (+ telemetry) into <vault>/projects/<slug>/cycles/<REQ>/.
@@ -977,13 +1560,23 @@ def archive_cycles(project: Path, vault: Path, slug: str, branch: str,
         req = retro.stem[len("RETRO-"):] if retro.stem.startswith("RETRO-") else retro.stem
         dest = dest_root / req
         if dest.exists() and not force:
-            # Already archived — but telemetry is usually written AFTER the RETRO
+            # Already archived — but the RETRO may have been CORRECTED since
+            # (possuite FD-4, sie-integraciones FD-7: a fixed RETRO was silently
+            # dropped while the backup exited 0). Re-copy when the content differs.
+            meta_p = dest / "meta.yaml"
+            was_empty = meta_p.is_file() and 'verdict: ""' in meta_p.read_text(
+                encoding="utf-8", errors="ignore")
+            updated = _refresh_changed_cycle(dest, req, telem_dirs, retro)
+            # Telemetry is usually written AFTER the RETRO
             # (the final-auditor closes the cycle, the dashboard aggregates later),
             # and the plain skip meant a cycle archived telemetry-less stayed that
             # way forever unless someone ran --force. Attach it if it showed up.
             added = _attach_late_telemetry(dest, req, telem_dirs, retro)
-            fixed = _refresh_verdict(dest, retro)
-            rows.append({"req": req, "status": "skip",
+            fixed = _refresh_verdict(dest, retro) or (
+                was_empty and 'verdict: ""' not in meta_p.read_text(encoding="utf-8", errors="ignore"))
+            if _attach_ajustes(dest, req, project, docs_root):
+                updated = True
+            rows.append({"req": req, "status": "updated" if updated else "skip",
                          **({"telem_added": True} if added else {}),
                          **({"verdict_added": True} if fixed else {})})
             continue
@@ -1001,6 +1594,7 @@ def archive_cycles(project: Path, vault: Path, slug: str, branch: str,
             f"verdict: \"{verdict}\"\n",
             encoding="utf-8",
         )
+        _attach_ajustes(dest, req, project, docs_root)
         rows.append({"req": req, "status": "archived", "verdict": verdict,
                      "telem": telem is not None, "branch": branch})
     return rows

@@ -17,6 +17,37 @@ Reduced-by-risk, Lite, Retroactive).
 Every `Agent` call has retry and timeout policies to prevent silent
 failures from propagating through the workflow.
 
+### Role lock (MANDATORY prompt preamble)
+
+Every subagent invocation prompt begins with a role lock:
+
+> You are a specialist subagent inside a running Kuraka cycle — the phase and
+> the inputs in THIS prompt are your entire task. Do not read `kuraka.md` /
+> `kuraka-modes.md`, do not invoke Kuraka skills or commands, do not spawn
+> agents, do not propose a pipeline, do not ask what the requirement is. If an
+> input artifact you need is missing, ask ONE precise question and stop.
+
+Without it, a subagent can drift into acting as the orchestrator (guai
+REQ-20260722: a Phase-2.5 invocation re-derived the whole pipeline and produced
+nothing — 66K tokens; the explicit lock eliminated the confusion in later
+cycles). *(Restored 2026-11 harvest: this section shipped in 1.1.0 and was lost
+in an unrelated 2026-08-12 commit; 9 of 11 guai-home appends re-added it by hand.)*
+
+### Git is READ-ONLY for review/verify subagents (HARD)
+
+`architect-reviewer`, `code-reviewer`, `security-reviewer`, `test-engineer`
+(review modes), `e2e-tester`, `deployment-verifier`, `migration-reviewer` — and
+any agent whose job is to JUDGE work rather than produce it — may run only
+read-only git: `status`, `log`, `diff`, `show`, `branch --list`, `rev-parse`,
+`ls-files`, `merge-base`. They must NEVER run `merge`, `pull`, `checkout`,
+`switch`, `reset`, `rebase`, `cherry-pick`, `stash`, `commit`, or `push`. A
+dirty or mid-merge tree found on entry is a **BLOCKER to report, never a state
+to resolve**. (guai REQ-20260721: a reviewer triggered an unintended `git merge`
+mid-review and left the consumer branch in a conflicted state; kuraka-control
+carried this as framework debt FD-16 through 8 cycles after the section was
+lost.) Writes to the working tree belong to implementer agents and the
+orchestrator only.
+
 ### Retry policy
 
 - **Max 2 retries per agent** (3 total attempts).
@@ -106,6 +137,24 @@ To prevent runaway loops:
 
 If an agent exceeds its limit without producing output → treat as timeout.
 
+**The harness turn ceiling is a hard wall, not a budget.** Implementer and test
+agents run with `maxTurns` ≈ 100 (`AGENT-HARNESS.yaml`). An agent that hits it
+ends **without a report** — the work it did is invisible and the phase must be
+re-run (editorial: C06/C09 test runs with >12 acceptance criteria + mutations;
+guai: one story needed 3 runs). So:
+
+- **Size the batch to the ceiling.** A story that lists more than ~15 files or
+  crosses more than 2 layers is split before Phase 4 (`story-refiner` /
+  orchestrator); a test phase with >12 criteria + mutations is split by criterion.
+- **The report is written incrementally from the first turn** (declared output
+  path, appended as work lands), never composed only at the end.
+- **At ~80 tool calls the agent stops expanding scope**: it runs its gate, writes
+  the report with the explicit list of what remains, and hands back. A
+  hand-back with a remaining-scope list is a success; a silent cut-off is not.
+- **Resume prefers a fresh run + delta** (Rule T10: the remaining-scope list +
+  the files already written) over re-loading the cut-off transcript, whose
+  cumulative tokens re-buy the whole context.
+
 **The tool-use cap is MEASURED after every invocation, exactly like the token cap.**
 Advisory prose failed for the token cap until it became an action (see below); it is
 failing for this one now. After each `Agent` call, compare `tool_uses` against the
@@ -187,9 +236,55 @@ typecheck + test ALL pass**, not just the test runner.
   single `make check` target (lint + typecheck + test) so the gate is one
   command that cannot pass while the build is broken.
 
+- **The environment the gate runs in must be current.** A story that touches
+  the dependency manifest, lockfile, or migrations forces a rebuild / recreate
+  of the test image/containers BEFORE its gate is trusted (no-cache if
+  migrations changed; compare the running image with the freshly built one);
+  the gate never runs shadowed by host artifacts (e.g. a bind-mounted
+  `node_modules`). A sudden burst of `Can't locate revision` / `column does not
+  exist` after touching migrations is a false regression from a stale image —
+  rebuild, don't chase (adela: two false greens in one cycle; guai: ~179 phantom
+  failures; editorial LL-001). *(Restored 2026-11 harvest — 1.1.0 item P6, lost
+  2026-08-12.)*
+- **Green is bound to a commit.** A gate result is recorded with
+  `gates_measured_at: <git rev-parse HEAD>` (and dirty-tree flag). A green
+  measured at another HEAD — before the last fix-run, on another branch, or in
+  another cycle's baseline — is not this story's green (guai FD-6, 5 cycles).
+- **One test runner per host.** A gate (suite, mutation run, E2E) read while
+  another suite / mutation / E2E is running on the same host is **void** — re-run
+  it alone. A test that fails only under load is re-run **isolated 3×** before
+  anyone calls it flaky; 3/3 green isolated + red under load = a real
+  concurrency/timing finding, not noise (editorial F-15, 5 retros: LL-017/019/032).
+- **Gate commands come from the project, never from an example.** The
+  orchestrator and every agent read them from `kuraka.config.yaml`
+  (`stack.*.test_cmd` / `lint_cmd` / `typecheck_cmd`) or the project's
+  `conventions/gate-commands.md`; frontend scripts from
+  `jq .scripts package.json`. If a workspace has no typecheck script, record the
+  substitute actually run (e.g. `npx tsc --noEmit`) — never cite a command the
+  project does not define. A config value of `TODO` / `TBD` / empty is **no
+  gate** (report it, don't treat it as green).
+
 Reference: kuraka-control LL-014 — an invalid `as string` cast rode green ~3
 cycles because the Phase-4 gate ran vitest only. Also `gate command integrity`
 above (the gate must be able to fail) and Phase 6.8 (`green ≠ working feature`).
+
+---
+
+## RTK token saver (transparent, if installed)
+
+If RTK (`rtk`) is installed with its global hook (`rtk init -g` → a `PreToolUse`
+hook `rtk hook claude` in `~/.claude/settings.json`), every Bash command an agent
+runs is **automatically rewritten** to its filtered `rtk` form (grep/cat/ls/git/
+test output is compressed before it reaches context). This needs NO per-agent
+wiring — all Kuraka subagents inherit it. Typical savings 70–90% on dev ops; check
+with `rtk gain`. See `RECOMMENDED-COMPONENTS.md`.
+
+**One exception — bypass the filter for byte-exact reads.** RTK truncates/dedups
+output, which can silently drop a field during a fidelity/contract check. When an
+agent needs the *exact, full* bytes — a verbatim-payload diff, an in-vivo contract
+probe, a frozen-schema cross-check, a count that is itself the evidence — run the
+command through `rtk proxy <cmd>` (raw, unfiltered) instead of the rewritten form.
+Never run a contract cross-check on truncated output.
 
 ---
 
@@ -211,6 +306,42 @@ Nominal budget per phase to detect deviations:
 | 6.5 E2E | 50–100K | 200K |
 | 6.7 Deployment | 30–60K | 120K |
 | 7 Final Audit | 40–80K | 150K |
+
+### Size-aware thresholds (S / M / L)
+
+The table above is the **M** row. A phase whose scope is declared S or L in the
+prompt (story size from `story-refiner`; for analysis phases, the REQ size the
+mode gate declared) is judged against its own band — one fixed number marks
+every L cycle over budget and every S cycle as "fine" when it is not (petsuite:
+phases 2/2.5/3 over the hard cap in 4 of 5 module cycles, `budget_ok` wrong in
+both directions):
+
+| Phase | S — investigate if exceeds | M | L |
+|---|---:|---:|---:|
+| 2 Story Refinement | 120K | 180K | 270K |
+| 2.5 Test Planning | 100K | 150K | 225K |
+| 3 Architect Review | 100K | 150K | 225K |
+| 4a Backend Impl (per story) | 267K | 400K | 600K |
+| 4b Frontend Impl (per story) | 267K | 400K | 600K |
+| 6 Tests (per story) | 200K | 300K | 450K |
+
+Rule of thumb: S = ⅔ × M, L = 1.5 × M. The size is **declared in the prompt
+before the run** (`size: S|M|L`) and copied into the telemetry entry; a size
+picked after seeing the tokens is not a size.
+
+**Named variants** (declared in the prompt, copied into the entry as `variant`):
+
+| Variant | Threshold |
+|---|---|
+| `1+2+2.5` — combined analysis run (Rule T3 default) | sum of the three phases' thresholds at the declared size (M: 530K) |
+| `3+probe` — architect review with a declared empirical probe (running code / live DB) | 1.3 × the Phase-3 threshold (M: 195K) |
+
+An undeclared variant is judged as the plain phase.
+
+**`budget_ok` is computed, not typed.** `aggregate-telemetry.py` recomputes it
+from `total_tokens`, `phase`, `size` and `variant` against these tables and flags
+any entry whose hand-written `budget_ok` disagrees (guai: 11 false values in one
+cycle). The value you write is a draft; the dashboard's is the verdict.
 
 These thresholds are **tokens (model compute)** — the only real spend signal.
 **Wall-clock `duration_ms` is NOT a budget gate**: it includes tool/DB/container
@@ -265,7 +396,7 @@ each call — not at the end of the phase, not "later".
 
 ## Checkpointing (MANDATORY)
 
-After EACH gate approved by the user, write the workflow state to:
+After EACH passed gate, write the workflow state to:
 
 `${architecture.paths.docs_process_root}/checkpoints/{REQ-name}-state.json`
 
@@ -300,7 +431,7 @@ After EACH gate approved by the user, write the workflow state to:
 
 ### When to write
 
-- After approval of Phase 1 → create initial checkpoint.
+- After Phase 1 passes → create initial checkpoint.
 - After EACH gate → update `phases_completed`, `current_phase`, `last_updated`.
 - When the user pauses the session → `status: "paused"`.
 - When Phase 7 completes → rename to `{REQ-name}-state.final.json`,
@@ -311,7 +442,7 @@ After EACH gate approved by the user, write the workflow state to:
 If a session is resumed (new chat, crash recovery):
 
 1. Read the most recent `{REQ-name}-state.json`.
-2. Confirm with user: "Resuming {REQ-name} from phase {current_phase}. Continue?"
+2. If the user requested resumption or previously authorized continuous execution, announce the phase and continue without asking again. Otherwise obtain authorization to resume; never override an explicit pause.
 3. Reload artifacts via paths in `artifacts.*`.
 4. Continue from `phases_pending[0]`.
 
@@ -360,6 +491,9 @@ is a debt to justify.)*
      "duration_ms": 0,
      "status": "ok | session_limit | interrupted | error",
      "produced": "<short description>",
+     "size": "S | M | L",
+     "variant": null,
+     "tool_uses_cap": 0,
      "budget_ok": true,
      "tool_uses_ok": true,
      "resumed": false,
@@ -369,7 +503,10 @@ is a debt to justify.)*
 3. If an agent is invoked multiple times in the same phase, each
    invocation is its own entry — use `mode` to disambiguate.
 4. If you do **not** use `Agent` for a phase (direct orchestrator work),
-   omit the entry — only track real invocations.
+   write a 0-token entry with `"agent": "orchestrator"` and the phase label, so
+   the checkpoint ↔ telemetry reconciliation does not report a false debt.
+   Combined runs use a `+`-joined label (`"1+2+2.5"`); the aggregator credits
+   each phase in it.
 5. Set `budget_ok` from **tokens vs the phase's "investigate if exceeds"
    threshold** — never from duration, and never default to `true` without
    actually comparing. A run cut short logs `status: "session_limit"` (so a
@@ -390,6 +527,16 @@ is a debt to justify.)*
    context") **false-positives on every resume** — that cycle's 2-line MEDIUM fix
    scored 53,641 tokens/use and was a flawless run. Without the flag, a
    pathological fresh agent and a healthy resume are indistinguishable.
+
+**The numbers come ONLY from the harness.** `total_tokens`, `tool_uses` and
+`duration_ms` are copied from the `<usage>` block the harness returns (or from
+`HOOK-LOG.jsonl`), never from the agent's own report. Agents do **not**
+self-report token or tool-use counts: self-reports ran below the harness in 3 of
+10 and 6 of 7 runs (azure FD-3, possuite, petsuite, piscosdalston). If an agent's
+report carries such a number anyway, it is ignored; if the harness value is
+unavailable, write `null` + `"usage_source": "unavailable"` — or, when a figure is
+genuinely needed, the estimate marked `[ESTIMACIÓN NO MEDIDA]` — never the
+self-report as if measured.
 
 The `final-auditor` reads this JSON in Phase 7 and produces the token
 ranking in the retro. Missing telemetry degrades the retro but doesn't

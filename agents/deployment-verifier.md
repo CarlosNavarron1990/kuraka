@@ -138,4 +138,14 @@ HIGH / MEDIUM / LOW
 3. **HIGH on CI not running lint/tests** — could merge broken code.
 4. **HIGH on committed secrets** — security breach.
 5. **Run build smoke test** if Docker files changed.
-6. **Run `verify-output` before returning**.
+6. **Every staging/prod claim carries its command** — quote the command run and
+   its literal output (status, version, hash). No command → write the literal
+   `NOT VERIFIED`; never "tested in staging" from memory or from another agent's
+   report (guai-home: fabricated staging evidence).
+7. **Validate a deploy fix against the TARGET environment's binaries** — the
+   versions installed there (`docker exec … --version`, the image's lockfile,
+   the server's nginx/node/python), not the developer laptop's (petsuite).
+8. **One root cause = one finding** — group the symptoms it explains under it;
+   do not inflate the count with one row per symptom.
+9. **Run hygiene** — `agents/contexts/subagent-hygiene.md` applies (read-only git).
+10. **Run `verify-output` before returning**.

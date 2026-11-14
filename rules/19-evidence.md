@@ -48,6 +48,31 @@ The same discipline covers every ad-hoc instrument, not only greps:
    authoring: against a planted violation (must HIT) and against the tree it
    will gate (must show the clean state) — and re-calibrated whenever that
    tree diverges from the authoring tree.
+5. **The control runs through the identical filter chain.** Output filters
+   (`| grep -v`, `| sort -u`, `| head`) are part of the instrument: the positive
+   control passes through exactly the same pipeline as the real query, or it
+   proves nothing. Exclude files at the source (`--exclude='._*'`), never by
+   filtering lines — `grep -v '._'` to drop AppleDouble files also deletes every
+   line containing `self._x`, and produced a false "0 callers" (editorial
+   F-24/LL-031).
+6. **A negative spy assertion has a positive twin on the same target.**
+   `not.toHaveBeenCalled()` / `assert_not_called()` stays green when the spy is
+   bound to the wrong object (namespace vs default import, the class vs the
+   instance). Every negative spy assertion ships with a sibling test in which
+   the same spy, on the same target, IS called and the assertion turns
+   (kuraka-control LL-001/LL-006, FP-9).
+7. **Cardinality claims need the measured universe.** "The only caller", "the
+   second one", "N consumers", "all paths" is a non-existence claim about
+   everything else: it cites the grep of the **executable operator** over the
+   **full universe** (whole repo, every workspace — not the directory you
+   suspected) plus a positive control. A count that rests on a comment,
+   docstring, or a previous artifact stays `[UNVERIFIED]` (guai FD-2, 6 cycles).
+8. **zsh instrument hygiene** (macOS default shell). Quote every glob that is an
+   argument (`--include='*.ts'`, `find . -name '*.py'`): unquoted, zsh aborts
+   with `no matches found` — that is INSTRUMENT-BROKEN, never a 0-match result.
+   Use arrays, not unquoted `$VAR` (zsh does not word-split). Capture a verdict
+   with its own exit: `cmd > out.log 2>&1; echo $? > out.exit`
+   (possuite LL-001, sie-integraciones FD-2).
 
 ## R-DERIVA — a derived artifact proves it conserved its source
 

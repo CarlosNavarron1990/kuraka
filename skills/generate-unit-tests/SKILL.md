@@ -14,8 +14,11 @@ for the project described in `kuraka.config.yaml`.
 
 ## Input
 
-- Test plan (from `analyze-testability`).
-- Source file to test.
+- Test plan cases with their oracles (Phase 2.5 plan; gaps from `analyze-testability`).
+- Source file to test (Phase 6) — or, in TEST_FIRST (3.95), only the interface
+  the story declares: the code does not exist yet.
+- **Every assertion's expected value comes from the plan / AC / rule — cite
+  it.** Never copy a value from what the implementation returns.
 
 ## Steps
 

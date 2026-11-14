@@ -15,6 +15,15 @@ post-review fix, kuraka-policies §Rate-limit): create the marker file
 `.claude/hooks/ALLOW-ORCH-WRITE`; the hook consumes it and allows exactly one
 write.
 
+Standing exception for the USER-SELECTED **Ultra Ahorro** mode
+(skills/kuraka-ahorro.md), where the main session IS the implementer: a write is
+allowed when an active scope declaration in `.claude/ultra-ahorro/<cycle>.json`
+names exactly this file. The first such write binds the cycle to the calling
+session (`<cycle>.owner`, created O_EXCL from the real hook payload), so a second
+session never inherits it; any status other than `active` revokes it at once.
+The exception is per file and per session — never a global allow-file — and it
+does not extend to shell writes, which the mode reviews in the final diff.
+
 Fail-open: no kuraka.config.yaml, or no roots configured -> exit 0.
 """
 from __future__ import annotations
@@ -24,6 +33,51 @@ import os
 import re
 import sys
 from pathlib import Path
+
+CYCLE_RE = re.compile(r"REQ-\d{8}-AHORRO-[A-Za-z0-9_-]{1,32}")
+
+
+def _ultra_ahorro_allows(proj: Path, target: str, session: str) -> bool:
+    """True when an ACTIVE Ultra Ahorro cycle owned by `session` declares
+    `target` (an absolute, symlink-resolved path) in its allowed_files."""
+    if not session:
+        return False  # no verified session identity -> no exception
+    root = proj / ".claude" / "ultra-ahorro"
+    if not root.is_dir():
+        return False
+    for decl in sorted(root.glob("*.json")):
+        try:
+            state = json.loads(decl.read_text(encoding="utf-8"))
+        except Exception:
+            continue  # corrupt declaration grants nothing
+        cycle = state.get("cycle_id")
+        if (state.get("mode") != "ultra-ahorro" or state.get("status") != "active"
+                or cycle != decl.stem or not CYCLE_RE.fullmatch(str(cycle))):
+            continue
+        allowed = state.get("allowed_files")
+        if not isinstance(allowed, list):
+            continue
+        for entry in allowed:
+            if (not isinstance(entry, str) or not entry or os.path.isabs(entry)
+                    or ".." in entry.replace(os.sep, "/").split("/")):
+                continue  # a malformed entry is ignored, never expanded
+            if os.path.realpath(os.path.join(proj, entry)) != target:
+                continue
+            owner = root / f"{cycle}.owner"
+            try:  # bind the cycle to the first session that actually writes
+                fd = os.open(owner, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    json.dump({"session_id": session}, fh)
+                return True
+            except FileExistsError:
+                try:
+                    bound = json.loads(owner.read_text(encoding="utf-8"))
+                except Exception:
+                    return False
+                return bound.get("session_id") == session
+            except OSError:
+                return False
+    return False
 
 
 def main() -> int:
@@ -70,6 +124,14 @@ def main() -> int:
     if not hit:
         return 0
 
+    try:
+        real = os.path.realpath(fp)
+    except Exception:
+        return 0
+    if _ultra_ahorro_allows(Path(os.path.realpath(proj)), real,
+                            str(data.get("session_id") or "")):
+        return 0  # user-selected Ultra Ahorro: declared file, bound session
+
     marker = proj / ".claude" / "hooks" / "ALLOW-ORCH-WRITE"
     if marker.is_file():
         try:
@@ -89,6 +151,14 @@ def main() -> int:
         f"run: touch .claude/hooks/ALLOW-ORCH-WRITE  (allows exactly ONE write, then "
         f"a mandatory re-review by the owning agent).\n"
     )
+    if (proj / ".claude" / "ultra-ahorro").is_dir():
+        sys.stderr.write(
+            f"Ultra Ahorro is in use in this project but `{rel}` is NOT in the "
+            f"active cycle's allowed_files (or the cycle is closed/aborted, or "
+            f"bound to another session). Widening the scope means updating the "
+            f"declaration AND re-checking eligibility — skills/kuraka-ahorro.md "
+            f"§2; if the new surface breaks a criterion, leave the mode.\n"
+        )
     return 2
 
 

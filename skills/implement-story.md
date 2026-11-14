@@ -17,6 +17,9 @@ for the project described in `kuraka.config.yaml`.
 A single approved story file from
 `${architecture.paths.docs_process_root}/stories/{ticket}-S{N}.md`.
 
+Plus the story's **locked acceptance tests** (Phase 3.95, listed in the
+checkpoint / `TESTLOCK-<REQ>.json`): they are RED now and define "done".
+
 ## Pre-flight Checks
 
 Before writing ANY code:
@@ -67,8 +70,18 @@ definition files.
 ${stack.backend.test_cmd}    # or ${stack.frontend.test_cmd}
 ```
 
+The story's locked acceptance tests must be GREEN, and
+`python3 "${KURAKA_VAULT}/kuraka-testlock.py" verify <project-root> --req <REQ>`
+must exit 0.
+
 ## Constraints
 
+- **Locked acceptance tests are read-only**: never edit, skip, delete or
+  loosen them. A test that looks wrong → stop and report `conflicto de
+  especificación` (test, plan line, reason); only a user-approved `unlock`
+  lets it change.
+- Any test you add takes its expected value from the plan / AC / rule (cite
+  it), never from what the new code returns.
 - Max LOC per file: `conventions.max_file_loc` (frontend may use
   `max_frontend_file_loc` if defined).
 - Max LOC per function: `conventions.max_function_loc`.

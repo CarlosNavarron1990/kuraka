@@ -34,17 +34,26 @@ def err(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
+def _report_owned(paths: list) -> None:
+    if paths:
+        print(f"   ↷ {len(paths)} archivo(s) del store NO re-aplicados — propios del proyecto "
+              f"(versionados en su git, que manda): {', '.join(paths[:4])}"
+              + (" …" if len(paths) > 4 else ""))
+
+
 def restore_tree(src: Path, dst: Path, force: bool) -> tuple[int, int]:
-    """Copy src→dst. Skip files already present unless force. Returns (copied, skipped)."""
+    """Copy src→dst. Skip files already present unless force. Returns (copied, skipped).
+    Even with force, a file the project VERSIONS in git is never overwritten."""
     if not src.is_dir():
         return (0, 0)
+    tracked = kc.git_tracked_files(dst) if force else set()
     copied = skipped = 0
     for s in src.rglob("*"):
         if s.is_dir():
             continue
         rel = s.relative_to(src)
         d = dst / rel
-        if d.exists() and not force:
+        if d.exists() and (not force or rel.as_posix() in tracked):
             skipped += 1
             continue
         d.parent.mkdir(parents=True, exist_ok=True)
@@ -120,10 +129,12 @@ def main() -> int:
     if args.overrides_only:
         if args.skip_overrides:
             return 0
-        oc = kc.restore_overrides(vault, slug, project, platform=platform)
+        skipped: list = []
+        oc = kc.restore_overrides(vault, slug, project, platform=platform, skipped=skipped)
         if oc:
             p_name = kc.platform_dirname(platform)
             print(f"   ✓ overrides re-aplicados: {oc} archivo(s) ({p_name}/{{agents,skills,commands}}, pisando la copia del vault)")
+        _report_owned(skipped)
         return 0
 
     if not kc.has_history(vault, slug):
@@ -158,10 +169,12 @@ def main() -> int:
     # overrides ALWAYS win over the freshly-mounted vault copy (that's their point),
     # so they overwrite regardless of --force.
     if not args.skip_overrides:
-        oc = kc.restore_overrides(vault, slug, project, platform=platform)
+        skipped = []
+        oc = kc.restore_overrides(vault, slug, project, platform=platform, skipped=skipped)
         if oc:
             p_name = kc.platform_dirname(platform)
             print(f"   overrides → {p_name}/{{agents,skills,commands}}   ({oc} re-aplicado(s), pisando la copia del vault)")
+        _report_owned(skipped)
     print("")
     print(f"✅ restore de {slug} completo.")
     return 0

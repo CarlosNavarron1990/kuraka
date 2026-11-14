@@ -149,7 +149,10 @@ with `architecture.paths.*`. For example with `python-fastapi` profile:
 8. **Stories are incremental** — each story implementable and testable
    independently.
 9. **Include test requirements** — list what tests each story needs.
-10. **Max complexity per story** — if too large, split it.
+10. **Max complexity per story** — if too large, split it. Concretely: a story
+    that lists more than ~15 files to create/modify, or crosses more than 2
+    layers, is split — one implementer run must fit the harness turn ceiling
+    (`kuraka-policies` §Turn ceiling; guai-home S4 needed 3 runs).
 11. **Explicit constant naming in AC** — If the story modifies a service
     file, add an AC that explicitly names each module-level constant the
     implementation must use (e.g. `document_type=DOC_TYPE_PDF`, not
@@ -222,6 +225,20 @@ with `architecture.paths.*`. For example with `python-fastapi` profile:
     unimplementable as written.
     (c) Every pinned grep uses word boundaries or explicit anti-collision
     (`grep -v '\.test\.ts'`, not `grep -v test` — "attest" contains "test").
+20. **New file names are checked case-insensitively** — before naming a new
+    file, run `git ls-files | sort -f | uniq -di` and check your new path
+    against existing names ignoring case: `Foo.ts` vs `foo.ts` collide on
+    macOS/Windows checkouts and break only there (guai-home).
+21. **A changed default drags its fixtures** — when a story changes a default
+    value (config default, column default, enum default, factory default), the
+    story lists every fixture/test/seed that relied on the old default (grep
+    the literal) under Files to Modify (possuite: 27 tests broke on one default).
+22. **Global mechanisms carry a scope table** — a story that adds or changes an
+    interceptor, guard, middleware, decorator or global exception handler
+    includes a table with one row per caller/route it now applies to
+    (`file:line`, intended effect, opt-out yes/no). Phase 3 freezes it and
+    Phase 5 re-checks it against the diff (possuite P-B/P-C).
+23. **Run hygiene** — `agents/contexts/subagent-hygiene.md` applies.
 
 ## After Completion
 

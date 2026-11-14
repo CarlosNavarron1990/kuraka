@@ -109,6 +109,11 @@ Default checks, not opt-in:
   normalized idempotently.
 - **Single-submit guard**, **design tokens defined**, **namespace type-imports**,
   **sibling-guard parity**, **silent deviation**, **re-derive every number**.
+- **Spec-sourced expectations** — every new/changed test's expected value cites
+  the plan / AC / contract / rule it comes from; an expectation that mirrors the
+  implementation is tautological (IMPORTANT; BLOCKER if it is an AC's only test).
+- **Locked tests** — `kuraka-testlock.py verify` exit 0; a locked acceptance test
+  changed without an `unlock` record = BLOCKER; red-first evidence present.
 
 Use the **DEFERRED** severity for real gaps a later planned phase owns (e.g.
 Phase-6 tests) — never inflate them to BLOCKER. If a reviewer digest was passed

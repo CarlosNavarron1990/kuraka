@@ -6,6 +6,7 @@ Python mirror of the bash `kuraka` dispatcher, for environments without bash
 behaviour matches. Resolve the vault from $KURAKA_VAULT or this file's own dir.
 
   kuraka mount [dir]                       mount/update Kuraka into dir (Claude Code)
+  kuraka mount --plan max|pro|team [dir]   Claude account plan → agent models
   kuraka mount --target codex|cursor|antigravity [dir]
   kuraka init  [dir]                       one-shot install (inspect+config+skeleton+mount+register)
   kuraka update                            update the framework in the project above CWD
@@ -70,10 +71,17 @@ def cmd_mount(args: list[str]) -> int:
     tgt = "claude"
     tgt_set = False
     dir_arg = None
+    plan: list[str] = []
     i = 0
     while i < len(args):
         a = args[i]
-        if a == "--target":
+        if a == "--plan":
+            plan = ["--plan", args[i + 1] if i + 1 < len(args) else ""]
+            i += 2
+        elif a.startswith("--plan="):
+            plan = [a]
+            i += 1
+        elif a == "--target":
             tgt = args[i + 1] if i + 1 < len(args) else ""
             tgt_set = True
             i += 2
@@ -102,7 +110,7 @@ def cmd_mount(args: list[str]) -> int:
         print("")
 
     if tgt in ("claude", "antigravity", "codex", "cursor"):
-        return py("kuraka-mount.py", str(target), "--target", tgt)
+        return py("kuraka-mount.py", str(target), "--target", tgt, *plan)
     err(f"❌ target desconocido: {tgt}  (claude | codex | cursor | antigravity)")
     return 1
 

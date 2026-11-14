@@ -50,6 +50,10 @@ Read:
 - Previous retros in
   `${architecture.paths.docs_process_root}/agent-retrospectives/`.
 - The conversation history for user corrections.
+- The Phase 6.9 user-validation ledger: `python3 "${KURAKA_VAULT}/kuraka-ajuste.py"
+  estado <project-root> --req <REQ> --json` (`ajustes/AJUSTES-<REQ>.md`). It is the
+  verbatim record of what the user had to ask to adjust — the RETRO's
+  `## Efectividad` section is built from it, never from memory.
 
 ### 2. Count iteration loops
 
@@ -104,7 +108,27 @@ For each agent / file that needs updating, specify:
 Create at
 `${architecture.paths.docs_process_root}/agent-retrospectives/RETRO-{REQ-name}.md`.
 
-Also copy to `RETRO-LATEST.md` for easy access.
+Also point `RETRO-LATEST.md` at it — as a symlink, re-created with `ln -sfn RETRO-{REQ}.md RETRO-LATEST.md`.
+NEVER `cp`/write onto an existing `RETRO-LATEST.md`: if it is a symlink, the write goes THROUGH it and
+clobbers the previous cycle's retro (guai-home: a 166 B stub overwrote a 31 KB RETRO, 2 incidents).
+Where symlinks are unavailable, `rm -f RETRO-LATEST.md` first, then copy.
+
+**Mandatory section — `## Efectividad (validación del usuario)`:**
+
+<!-- Built from `python3 "${KURAKA_VAULT}/kuraka-ajuste.py" estado <root> --req <REQ> --json`
+     (Phase 6.9 ledger, `ajustes/AJUSTES-<REQ>.md`). Never re-derived from memory. -->
+- Aceptación: `<primera-ronda | tras-N-rondas | sin-aceptacion | sin-registro>` · rondas: N · ajustes: N · faltó preguntar/hacer: N · pendientes: N
+
+| # | Tipo | Debió detectarlo | Pedido del usuario (textual) | Patch aplicado (capa del proyecto) |
+|---|------|------------------|------------------------------|------------------------------------|
+
+For EVERY `falto-preguntar` / `falto-hacer` row: a concrete patch to the project
+layer — the `.append.md` of the agent named in "debió" (a question it must ask,
+a check it must run), a `lessons-learned/` entry, or a `review-checks/` line —
+applied in this phase and tagged `harvest-candidate` so `/kuraka-harvest` can
+lift it into the vault. `bug` / `ux` rows: say which gate or recorrido step
+should have failed and didn't. `sin-registro` (no ledger) is itself a finding:
+the cycle closed without the user's validation being recorded.
 
 **Contract of the RETRO FILE — the last line is mandatory:**
 
@@ -131,6 +155,11 @@ count in any cross-project comparison).
 changes and agent prompt tuning can be applied immediately to the mounted agent files (`.agents/` in Antigravity, `.claude/` in Claude Code, `.cursor/` in Cursor, `.codex/` in Codex); framework changes require
 contributing back to the framework repo."
 When approved by the user, apply project-layer and agent prompt patches directly to the corresponding mounted files.
+The `falto-preguntar` / `falto-hacer` patches from `## Efectividad` go to the
+PROJECT LAYER (`.claude/project/agents/<agent>.append.md`, `lessons-learned/`,
+`review-checks/`) with a `harvest-candidate` tag line, so the Phase 7 backup
+carries them to the vault store and `/kuraka-harvest` sees them grouped across
+projects.
 
 ### 9. Back up the cycle state to the vault (MANDATORY — last step)
 

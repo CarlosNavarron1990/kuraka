@@ -120,6 +120,14 @@ migrations vs SQL seeds) that the generic checklist won't flag.
 - **LOW** — Style/convention issue.
 - **INFO** — Best practice note.
 
+**A BLOCKER must carry its proof**: name the invariant it violates (zero-downtime,
+downgrade, data preservation — with the migration `file:line`) and show the risk
+is introduced by THIS cycle's migrations, not pre-existing (`git show
+<baseline>:<file>` / `alembic history` at the baseline head). A pre-existing risk
+in an untouched migration is a follow-up, not a gate (guai-home). Before
+deferring a HIGH, grep `RECURRING-ISSUES.md` / prior RETROs — deferred ≥2 times
+→ fix now (petsuite).
+
 ## Output Format
 
 ```markdown
@@ -167,5 +175,6 @@ HIGH / MEDIUM / LOW
 6. **Be specific about fix** — show the corrected migration op call.
 7. **Project pre-checks first** — failures there often block the migration
    regardless of the generic checklist.
-8. **Output structure is hook-validated on Claude Code** (`SubagentStop`) — end
+8. **Run hygiene** — `agents/contexts/subagent-hygiene.md` applies (read-only git).
+9. **Output structure is hook-validated on Claude Code** (`SubagentStop`) — end
    with the `**Verdict:**` line and `## Confidence`. <!-- kuraka:discipline:output-validation -->

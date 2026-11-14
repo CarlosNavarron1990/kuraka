@@ -94,6 +94,20 @@ source structure:
 Without (a)–(e) the agent re-derives them file by file, and that is where the
 budget goes.
 
+**Digest invalidation and ceiling** *(1.1.0 harvest P4 — restored 2026-11; lost in
+the 2026-08-12 rewrite):*
+
+- **Re-scope invalidates the digest.** If the cycle is re-pointed at a different
+  codebase, module, branch, or target than the digest was built from, the
+  orchestrator REBUILDS the digest from the target's real files and re-verifies
+  every anchor (file:line, switch cases, enum values) before it enters a
+  REQ/brief; every `[VERIFICADO]` mark from the old target drops to
+  `[SIN VERIFICAR]`. A stale digest anchor leaked a phantom requirement from a
+  sibling codebase into a brief (sie DD1243: ~406K tokens of mis-scoped work).
+- **Hard context ceiling per agent:** the invocation states the digest/package
+  budget; if the package would breach it before the agent's first tool call, the
+  agent asks the orchestrator to narrow it instead of absorbing it.
+
 **Evidence for (e) — REQ-20260804-audit-columns:** `story-refiner` spent
 **278,325 tokens / 111 tool uses** (1.55× the token cap, **3.7× the tool-use cap**)
 re-verifying the 12 tables the REQ already cited by `file:line`. The lesson is NOT
@@ -278,15 +292,22 @@ agregador, no la regla.
 
 El pre-flight de Fase 3.9 debe ejecutar y registrar, **por workspace**, TODOS los
 comandos por los que cualquier gate posterior vaya a juzgarse — no solo la suite
-principal. En este proyecto:
+principal: test, lint y typecheck de cada workspace.
 
-```
-backend:   make test-run
-frontend:  npm run type-check   Y   npm run lint   Y   npm test
-```
+**Los comandos salen del proyecto, nunca de este texto.** Se leen de
+`kuraka.config.yaml` (`stack.<workspace>.test_cmd` / `lint_cmd` /
+`typecheck_cmd`) o de `conventions/gate-commands.md` de la capa del proyecto; los
+scripts frontend, de `jq .scripts package.json`. Si un workspace no define
+typecheck, se registra el sustituto realmente corrido (p. ej. `npx tsc --noEmit`)
+marcado como sustituto. Un valor `TODO`/`TBD`/vacío en el config **no es un
+gate**: se reporta como hueco, nunca como verde. (Este texto citaba antes los
+comandos de un proyecto concreto — `make test-run`, `npm run type-check` — y
+`po-analyst` los copió en 4 artefactos de otro proyecto que no los tenía:
+possuite FD-1, azure FD-8.)
 
-Registrar exit code, conteos y una lista `baseline_red` explícita **para cada
-uno**. Un gate sin línea base grabada no puede distinguir *preexistente* de
+Registrar exit code, conteos, `gates_measured_at` (HEAD) y una lista
+`baseline_red` explícita **para cada uno**. Una línea base de OTRO ciclo no
+sirve: se mide en este (editorial F-31). Un gate sin línea base grabada no puede distinguir *preexistente* de
 *regresión*.
 
 **Evidencia (REQ-20260801):** solo se midió `make test-run`. Cuando
@@ -323,13 +344,13 @@ posteriori para averiguar si el error era nuestro.
 avanzar una story o fase.
 
 **Cómo**: correr el comando del gate SIN pipe y asertar sobre **su propio**
-exit code (`make test-run`, luego `$?`). NUNCA pipear el comando del gate
+exit code (el `test_cmd` del proyecto, luego `$?`). NUNCA pipear el comando del gate
 (`make ... | tail`, `... | grep`) — el shell reporta el exit code del ÚLTIMO
 comando (el del pipe), así que una suite que falla puede leerse como verde. Si
 hay que recortar la salida, redirigir a un archivo y leer el archivo.
 
 Además: al planificar el pipeline, verificar que cada gate declarado realmente
-**puede fallar**. Un `make test-run` sin `--exit-code-from`, un target que no
+**puede fallar**. Un target de docker-compose sin `--exit-code-from`, un target que no
 propaga el fallo, o un eslint no instalado (exit 127) son gates muertos —
 arreglarlos o marcarlos `SKIPPED (broken: <reason>)` explícitamente, nunca
 tratarlos como verde.
@@ -342,10 +363,17 @@ orden-dependiente (fixture module-scoped + monkeypatch function-scoped) que
 pasa en agregado y falla solo — exactamente la regresión que el guard existe
 para atrapar (REQ-20260703).
 
+**Un runner por host**: un gate leído mientras otra suite, corrida de mutación o
+E2E corre en el mismo host es **nulo** — se repite a solas. Un test que falla
+solo bajo carga se corre **aislado 3 veces** antes de llamarlo flaky
+(editorial F-15, 5 retros). Detalle en `kuraka-policies.md` → "Definition of
+green".
+
 **Por qué**: REQ-20260611 S3 avanzó en FALSO VERDE (`make ... | tail`) con la
 suite fallando en collection; REQ-20260703 cerró un gate con un guard test
 falso-verde por orden. Ver también `kuraka-policies.md` → "Gate command
-integrity" y "Definition of green".
+integrity" y "Definition of green" (entorno actual, verde atado a HEAD, comandos
+del proyecto).
 
 ---
 
@@ -371,6 +399,13 @@ requiere juicio:
 - **Ruta del smoke**: grep de la URL realmente golpeada en el log del smoke vs
   la ruta de producción que nombra el REQ. No coinciden ⇒ el smoke es FAIL.
 - **Guard tests**: correr aislado cada test de aserción negativa (ver T7).
+- **El entorno de la reproducción también se verifica**: si la story tocó el
+  manifest de dependencias, el lockfile o las migraciones, la imagen/contenedores
+  de test se **reconstruyen/recrean ANTES** de reproducir el gate; nunca sobre un
+  entorno sombreado por el host; una ráfaga de `Can't locate revision` /
+  `column does not exist` tras tocar migraciones es regresión FALSA de imagen
+  stale — rebuild y re-run (1.1.0 P6, restaurado 2026-11; detalle en
+  `kuraka-policies.md` → "Definition of green").
 - **Digest para reviewers** (extiende T8): el orquestador pre-extrae los hunks
   por función del `git diff` y los pasa al code/security-reviewer como tabla
   "set cambiado vs set autorizado" — la verificación de scope se vuelve un
@@ -443,6 +478,30 @@ re-pegado**. El run de remediación dio **8.871 tokens por tool-use** frente a
 
 Target: **30–50K tokens** por re-run (vs 120–170K con contexto completo).
 
+*(T10.b/T10.c — 1.1.0 harvest P5, restaurados 2026-11; se perdieron en la
+reescritura del 2026-08-12.)*
+
+**T10.b — clasificá el patch ANTES de presupuestarlo como delta.** Un delta T10
+solo es barato si es **textual y acotado** (renombrar, ajustar una AC, corregir
+una ruta). Generar código/config **normativo nuevo** (un bloque copy-this, una
+migración, un snippet de wiring) tiene presupuesto de run completo aunque llegue
+como "fix". Lotes mixtos se parten en dos runs (uno textual T10, uno generativo
+normal) — un "delta" mixto costó 281K contra un target de 30–50K.
+
+**T10.c — tiers de presupuesto:**
+
+| Tier | Alcance | Target |
+|------|---------|--------|
+| T10-S | 1 archivo, ≤3 edits textuales | 30–50K |
+| T10-M | ≤3 archivos, ≤10 findings | 90–130K |
+| T10-L | >3 archivos o cambio de contrato | T10 NO aplica — re-run de fase |
+
+Pasá solo el imperativo por finding, no las justificaciones completas. Un run
+T10-M en banda no es una violación; un T10-L disfrazado de delta sí. El cost
+artifact también escala: un delta sobre un archivo de stories enorme paga la
+lectura del archivo entero — una story nueva va en su propio archivo
+(editorial F-17).
+
 **Estimación de ahorro**: 100–140K tokens por re-run de fase.
 
 ---
@@ -499,6 +558,14 @@ de tool_uses multiplicado x1.5 EN EL PROMPT. No se recorta la practica
 (es la que convirtio "este test puede fallar" en hecho): se presupuesta,
 para que un WARN vuelva a significar anomalia y no rutina.
 
+**El techo de turnos del harness no se presupuesta, se respeta.** Con
+`maxTurns` ≈ 100, una fase de test con >12 criterios + mutaciones, o una story de
+>~15 archivos / >2 capas, se corta SIN reporte (editorial F-16/LL-022; guai
+FD-15: una story necesitó 3 runs). Se parte el lote antes de lanzar, el reporte
+se escribe incremental desde el primer turno y a ~80 tool calls el agente corre
+su gate y devuelve con la lista de lo pendiente. Detalle en `kuraka-policies.md`
+→ "Tool use limits per agent".
+
 ---
 
 ## Rule T13 — El costo de un ciclo es `150K x invocaciones`, no `tokens x prosa`
@@ -524,3 +591,28 @@ no su trabajo. De ahi salen tres consecuencias operativas:
 (smoke) y 7 (mediana 47K, la fase mas barata de la suite). Tampoco el tier de
 modelo de los gates de juicio: un ciclo mal cerrado cuesta 1.8M de retrabajo,
 que es mas que todo lo que ahorraria degradarlos.
+
+## Rule T1.1(c-bis) — El «FULL consumer set» cubre tambien los simbolos que se CITAN como el mecanismo (M-3, RETRO-REQ-20260909; aplicado 2026-09-14)
+
+T1.1(c) exige el conjunto completo de consumidores de todo simbolo que el REQ dice
+**reemplazar, renombrar o borrar**. Se extiende a todo simbolo que el REQ **CITAN como el
+mecanismo** de una decision — el guard que reescribe un destino, el helper que resuelve un
+id, la constante que fija un limite — aunque el REQ no lo toque.
+
+Razon: si el mecanismo tiene mas consumidores de los que el REQ cree, la decision que se
+apoya en el es correcta para uno y falsa para los demas. Evidencia REQ-20260914: el
+digest clasifico `push('/cliente')` como «discutible» sin abrir
+`router/index.ts:456-459`, el guard que lo reescribe a `cliente-datos` — o sea que ese
+«Atras» REINICIABA el alta. El mecanismo no estaba en alcance; decidia el alcance.
+
+## Rule T12.1 — El `tool_uses_cap` se DECLARA en el prompt y se ESCRIBE en la telemetria (P-6, RETRO-REQ-20260908/0909; aplicado 2026-09-14 tras 2 ciclos)
+
+T12 dice que ciertas fases merecen un cap de tool-uses x1,5. No se aplicaba porque no
+existia el campo donde escribirlo, asi que `budget_ok` solo miraba tokens y 12 de 28 runs
+de un ciclo quedaron en WARN por friccion legitima — un WARN que significa «rutina» deja
+de significar «anomalia».
+
+Contrato: el prompt de cada fase declara `tool_uses_cap: <n>` y la entrada de telemetria
+de ese run lo COPIA junto a `tool_uses`. `budget_ok` se calcula contra AMBOS techos. Un
+run sin `tool_uses_cap` en su entrada es telemetria incompleta y se declara como deuda en
+el §0 del RETRO.

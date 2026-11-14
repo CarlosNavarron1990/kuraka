@@ -24,6 +24,8 @@ import sys
 from fnmatch import fnmatch
 from pathlib import Path
 
+import kuraka_common as kc
+
 # Emit UTF-8 regardless of the console code page (Windows cp1252/cp850 would
 # otherwise crash with UnicodeEncodeError on our emoji/box-drawing output).
 for _s in (sys.stdout, sys.stderr):
@@ -139,8 +141,14 @@ def count_codex_agents(dstdir: Path) -> int:
     return sum(1 for p in dstdir.glob("*.toml") if p.is_file())
 
 
+# Never mounted, whatever the category: interpreter caches and macOS
+# AppleDouble metadata (the vault lives on an external volume).
+ALWAYS_EXCLUDED = ("__pycache__", "*.pyc", "._*", ".DS_Store")
+
+
 def _excluded(rel: Path, exclude: tuple[str, ...]) -> bool:
-    return any(fnmatch(part, pat) for part in rel.parts for pat in exclude)
+    pats = exclude + ALWAYS_EXCLUDED
+    return any(fnmatch(part, pat) for part in rel.parts for pat in pats)
 
 
 def sync_tree(src: Path, dst: Path, exclude: tuple[str, ...] = (), target_env: str = "claude") -> None:
@@ -179,9 +187,58 @@ def _shadowed(src_skills: Path, d: Path) -> tuple:
     return ("SKILL.md",) if (src_skills / f"{d.name}.md").is_file() else ()
 
 
+def _plan_rendered(target_env: str) -> bool:
+    """Claude target on a non-max plan: agent model: lines are rendered."""
+    return target_env == "claude" and not kc.claude_plan_is_identity(VAULT)
+
+
+# --- Coexistence: never touch what the project versions in git -------------
+# Filled by _init_ownership(target) at the start of main(). A destination the
+# project TRACKS is project-owned: copy_file never overwrites it (unless it is
+# already byte-identical), the mount never deletes it, and the run ends with the
+# list of what was left alone. Non-git targets track nothing → old behavior.
+_OWN: dict = {"target": None, "tracked": set(), "skipped": []}
+
+
+def _init_ownership(target: Path) -> None:
+    _OWN.clear()
+    _OWN["target"] = target
+    _OWN["tracked"] = kc.git_tracked_files(target)
+    _OWN["skipped"] = []
+
+
+def _tracked_rel(dst: Path) -> "str | None":
+    """Posix path of dst relative to the target when the project tracks it."""
+    t = _OWN["target"]
+    if t is None or not _OWN["tracked"]:
+        return None
+    try:
+        rel = dst.resolve().relative_to(t).as_posix() if dst.exists() else \
+            (dst.parent.resolve() / dst.name).relative_to(t).as_posix()
+    except (ValueError, OSError):
+        return None
+    return rel if rel in _OWN["tracked"] else None
+
+
+def _skip_owned(label: str) -> None:
+    if label not in _OWN["skipped"]:
+        _OWN["skipped"].append(label)
+
+
+def _owned_skills(dst_skills: Path) -> "set[str]":
+    t = _OWN["target"]
+    if t is None:
+        return set()
+    try:
+        p_name = dst_skills.parent.resolve().relative_to(t).as_posix()
+    except (ValueError, OSError):
+        return set()
+    return kc.project_owned_skills(_OWN["tracked"], p_name)
+
+
 def _rendered_bytes(src: Path, target_env: str) -> bytes:
     """Exactly what copy_file would write for this source and platform."""
-    if target_env != "claude" and src.suffix == ".md":
+    if src.suffix == ".md" and (target_env != "claude" or _plan_rendered(target_env)):
         from kuraka_common import render_for_platform
         return render_for_platform(
             src.read_text(encoding="utf-8", errors="ignore"),
@@ -200,8 +257,12 @@ def copy_file(src: Path, dst: Path, target_env: str = "claude") -> None:
         return
     if dst.is_file() and dst.read_bytes() == _rendered_bytes(src, target_env):
         return
+    owned = _tracked_rel(dst)
+    if owned:
+        _skip_owned(owned)  # versioned by the project: its copy wins
+        return
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if target_env != "claude" and src.suffix == ".md":
+    if src.suffix == ".md" and (target_env != "claude" or _plan_rendered(target_env)):
         # Non-Claude renders SUBTRACT from the Claude-native vault superset:
         # drop Claude-only harness frontmatter (tools/maxTurns/...), re-expand
         # the manual discipline prose the Claude hooks replace, then apply the
@@ -236,18 +297,39 @@ def merge_claude_hook_settings(platform_dir: Path):
         desired = json.loads(tmpl.read_text(encoding="utf-8")).get("hooks", {})
     except Exception as e:
         return f"unreadable template: {e}"
-    sfile = platform_dir / "settings.json"
+    def _is_kuraka(entry: dict) -> bool:
+        return any(".claude/hooks/" in h.get("command", "")
+                   for h in entry.get("hooks", []) if isinstance(h, dict))
+
+    # A settings.json the team VERSIONS is theirs (azure keeps its validar-pr
+    # hooks there): Kuraka wires into settings.local.json instead — Claude Code
+    # loads and merges both — and never edits the tracked file.
+    shared = platform_dir / "settings.json"
+    sfile = shared
+    if _tracked_rel(shared):
+        try:
+            old = json.loads(shared.read_text(encoding="utf-8")).get("hooks", {})
+            committed = sum(1 for es in old.values() for e in es if _is_kuraka(e))
+        except Exception:
+            committed = 0
+        # A tracked settings.json that ALREADY carries Kuraka hook entries was
+        # committed with them on purpose (editorialcesarvallejo): the project
+        # opted into Kuraka managing them there. Keep updating in place —
+        # writing settings.local.json too would wire every hook TWICE (Claude
+        # Code merges both files). Only a tracked file with NO Kuraka entries
+        # is the team's alone, and then Kuraka goes to settings.local.json.
+        if committed:
+            _OWN["hook_file_inplace"] = True
+        else:
+            sfile = platform_dir / "settings.local.json"
+            _OWN.setdefault("hook_file", sfile.name)
     settings = {}
     if sfile.is_file():
         try:
             settings = json.loads(sfile.read_text(encoding="utf-8"))
         except Exception:
-            return "existing settings.json is not valid JSON — fix it and re-mount"
+            return f"existing {sfile.name} is not valid JSON — fix it and re-mount"
     hooks = settings.setdefault("hooks", {})
-
-    def _is_kuraka(entry: dict) -> bool:
-        return any(".claude/hooks/" in h.get("command", "")
-                   for h in entry.get("hooks", []) if isinstance(h, dict))
 
     changed = False
     for event, entries in desired.items():
@@ -282,13 +364,21 @@ def sync_claude_skills(src_skills: Path, dst_skills: Path) -> int:
     previously mounted directory form is removed."""
     dst_skills.mkdir(parents=True, exist_ok=True)
     command_names = {c.stem for c in (VAULT / "commands").glob("*.md")}
+    owned = _owned_skills(dst_skills)
     count = 0
     for p in sorted(src_skills.glob("*.md")):
+        if not kc.skill_mounted_on(p.stem, "claude"):
+            continue
+        if p.stem in owned:
+            # The project versions its own skill of this name (azure: validar-pr,
+            # security-audit) — it is the one Claude must register.
+            _skip_owned(f"{dst_skills.name}/{p.stem}/ (skill del proyecto)")
+            continue
         skill_dir = dst_skills / p.stem
         if p.stem in command_names:
             # Never register a skill that would shadow the /<n> command.
             legacy = skill_dir / "SKILL.md"
-            if legacy.is_file():
+            if legacy.is_file() and not _tracked_rel(legacy):
                 legacy.unlink()
                 if not any(skill_dir.iterdir()):
                     skill_dir.rmdir()
@@ -307,8 +397,10 @@ def sync_claude_skills(src_skills: Path, dst_skills: Path) -> int:
     # guard was removed this was masked by luck: the just-written file happened
     # to be newer, so the overwrite was skipped.
     for d in src_skills.iterdir():
-        if d.is_dir():
-            sync_tree(d, dst_skills / d.name, exclude=_shadowed(src_skills, d),
+        if d.is_dir() and kc.skill_mounted_on(d.name, "claude") and d.name not in owned:
+            sync_tree(d, dst_skills / d.name,
+                      exclude=_shadowed(src_skills, d)
+                      + kc.skill_asset_excludes(d.name, "claude"),
                       target_env="claude")
     return count
 
@@ -327,6 +419,12 @@ def ensure_claude_md_block(target: Path) -> bool:
         f"{end}"
     )
     cm = target / "CLAUDE.md"
+    committed_block = cm.is_file() and begin in cm.read_text(encoding="utf-8", errors="ignore")
+    if _tracked_rel(cm) and not committed_block:
+        # The team versions CLAUDE.md: keep the managed block in the per-user
+        # CLAUDE.local.md (loaded by Claude Code, excluded locally) instead.
+        cm = target / "CLAUDE.local.md"
+        _OWN["claude_md"] = cm.name
     if cm.is_file():
         text = cm.read_text(encoding="utf-8", errors="ignore")
         if begin in text and end in text:
@@ -348,8 +446,14 @@ def sync_antigravity_skills(src_skills: Path, dst_skills: Path) -> int:
     each skill is a directory .agents/skills/<skill_name>/SKILL.md, plus preserving
     subdirectories like evals/ and sentry-triage/."""
     dst_skills.mkdir(parents=True, exist_ok=True)
+    owned = _owned_skills(dst_skills)
     count = 0
     for p in src_skills.glob("*.md"):
+        if not kc.skill_mounted_on(p.stem, "agents"):
+            continue
+        if p.stem in owned:
+            _skip_owned(f"{dst_skills.name}/{p.stem}/ (skill del proyecto)")
+            continue
         skill_name = p.stem
         skill_dir = dst_skills / skill_name
         skill_dir.mkdir(parents=True, exist_ok=True)
@@ -364,17 +468,20 @@ def sync_antigravity_skills(src_skills: Path, dst_skills: Path) -> int:
     # guard was removed this was masked by luck: the just-written file happened
     # to be newer, so the overwrite was skipped.
     for d in src_skills.iterdir():
-        if d.is_dir():
-            sync_tree(d, dst_skills / d.name, exclude=_shadowed(src_skills, d))
+        if d.is_dir() and kc.skill_mounted_on(d.name, "agents") and d.name not in owned:
+            sync_tree(d, dst_skills / d.name,
+                      exclude=_shadowed(src_skills, d)
+                      + kc.skill_asset_excludes(d.name, "agents"))
     return count
 
 
-def _codex_skill_text(name: str, description: str, body: str, source_kind: str) -> str:
+def _codex_skill_text(name: str, description: str, body: str, source_kind: str,
+                      vault: Path | None = None) -> str:
     """Back-compat alias — canonical implementation in kuraka_common, so the
     mount manifest baseline for .codex/skills/<n>/SKILL.md matches what this
     writes (that projection is NOT a plain copy_file render)."""
     from kuraka_common import codex_skill_text
-    return codex_skill_text(name, description, body, source_kind)
+    return codex_skill_text(name, description, body, source_kind, vault)
 
 def _frontmatter_and_body(path: Path) -> tuple[dict[str, str], str]:
     from kuraka_common import split_frontmatter
@@ -409,7 +516,15 @@ def sync_codex_skills(src_skills: Path, dst_skills: Path) -> int:
             # newline="\n": keep the bytes identical to the manifest baseline
             # (which hashes this same projection) on Windows too.
             with open(skill_dir / "SKILL.md", "w", encoding="utf-8", newline="\n") as fh:
-                fh.write(_codex_skill_text(name, desc, body, "skill"))
+                fh.write(_codex_skill_text(name, desc, body, "skill",
+                                           src_skills.parent))
+            if name == "kuraka":
+                reference = skill_dir / "references" / "workflow.md"
+                reference.parent.mkdir(parents=True, exist_ok=True)
+                reference.write_text(
+                    kc.render_for_platform(body, "codex", src_skills.parent),
+                    encoding="utf-8",
+                )
             count += 1
         # same rule as the Claude mount: the flat skill owns SKILL.md (here it
         # is rebuilt as a Codex-native projection), the directory only adds its
@@ -579,6 +694,68 @@ def ensure_codex_agent_config(config_path: Path) -> bool:
 
 # ------------------------------------------------------------------------- main
 
+_EXCLUDE_BEGIN = "# >>> kuraka (gestionado por kuraka-mount — local, no se versiona) >>>"
+_EXCLUDE_END = "# <<< kuraka <<<"
+
+
+def write_local_excludes(target: Path, gitignore: Path, patterns: list) -> str:
+    """Write Kuraka's ignore patterns to the repo's LOCAL exclude file
+    (`git rev-parse --git-path info/exclude`, worktree-safe), never to the
+    project's .gitignore. An uncommitted .gitignore edit is exactly what GitHub
+    Desktop stashes on a branch switch — and once it is stashed, .claude/agents,
+    kuraka.config.yaml and docs/ stop being ignored and get stashed too (azure:
+    5 stashes 2026-11-05..13 carried the whole Kuraka state away). Idempotent
+    marker block. Non-git targets fall back to .gitignore (nothing to stash)."""
+    import subprocess as _sp
+    body = [p for p in patterns if p and not p.startswith("#")]
+    try:
+        r = _sp.run(["git", "-C", str(target), "rev-parse", "--git-path", "info/exclude"],
+                    capture_output=True, text=True, check=False)
+    except OSError:
+        r = None
+    if r is None or r.returncode != 0 or not r.stdout.strip():
+        existing = gitignore.read_text(encoding="utf-8", errors="ignore").splitlines() \
+            if gitignore.exists() else []
+        to_add = [p for p in patterns if p not in existing]
+        if to_add:
+            with gitignore.open("a", encoding="utf-8") as fh:
+                for p in to_add:
+                    fh.write(p + "\n")
+            return f"   + {len(to_add)} entradas añadidas a .gitignore (sin git)"
+        return "   ✓ .gitignore al día (sin git)"
+    excl = Path(r.stdout.strip())
+    if not excl.is_absolute():
+        excl = (target / excl).resolve()
+    block = "\n".join([_EXCLUDE_BEGIN, *body, _EXCLUDE_END])
+    text = excl.read_text(encoding="utf-8", errors="ignore") if excl.is_file() else ""
+    if _EXCLUDE_BEGIN in text and _EXCLUDE_END in text:
+        head, _, rest = text.partition(_EXCLUDE_BEGIN)
+        _, _, tail = rest.partition(_EXCLUDE_END)
+        new = head + block + tail
+    else:
+        new = (text.rstrip("\n") + "\n\n" if text.strip() else "") + block + "\n"
+    msg = "   ✓ ignores de Kuraka en .git/info/exclude (local: no se versiona ni se va en un stash)"
+    if new != text:
+        excl.parent.mkdir(parents=True, exist_ok=True)
+        excl.write_text(new, encoding="utf-8")
+        msg = "   + ignores de Kuraka escritos en .git/info/exclude (local: no se versiona ni se va en un stash)"
+    # A Kuraka block left UNCOMMITTED in .gitignore by an older mount is the
+    # stash hazard itself: say so, never edit the team's file.
+    try:
+        d = _sp.run(["git", "-C", str(target), "diff", "HEAD", "--", ".gitignore"],
+                    capture_output=True, text=True, check=False).stdout
+        untracked = ".gitignore" not in kc.git_tracked_files(target) and gitignore.exists()
+    except OSError:
+        d, untracked = "", False
+    old_marker = "# Kuraka framework files"
+    if old_marker in "\n".join(l for l in d.splitlines() if l.startswith("+")) or \
+            (untracked and old_marker in gitignore.read_text(encoding="utf-8", errors="ignore")):
+        msg += ("\n   ⚠ .gitignore tiene un bloque Kuraka SIN commitear de un mount anterior: "
+                "descartalo (`git checkout -- .gitignore` o quitá esas líneas) — un stash se lo "
+                "lleva y con él todo el estado Kuraka; ahora vive en .git/info/exclude")
+    return msg
+
+
 def main() -> int:
     _enable_windows_ansi()
 
@@ -588,7 +765,7 @@ def main() -> int:
 
     args_list = sys.argv[1:]
     if any(arg in ("-h", "--help") for arg in args_list):
-        print("Usage: python3 kuraka-mount.py [target_dir] [--target claude|antigravity|cursor|codex] [--update]")
+        print("Usage: python3 kuraka-mount.py [target_dir] [--target claude|antigravity|cursor|codex] [--plan max|pro|team] [--update]")
         print("Mount Kuraka framework artifacts into a consumer project.")
         print("")
         print("  --update / -u / update   Framework-only refresh: updates agents, skills,")
@@ -603,9 +780,19 @@ def main() -> int:
         print("                           its own render — it never first-mounts a platform.")
         print("                           Restart the session afterwards to re-register")
         print("                           agents/skills/hooks.")
+        print("")
+        print("  --plan max|pro|team      Claude account plan (claude target only). Picks the")
+        print("                           model column of MODEL-ROUTING.yaml claude_plans:")
+        print("                             max  = Claude Max: Fable gates, Opus judgment")
+        print("                             pro  = Claude Pro ($20): Sonnet ceiling, Haiku fast")
+        print("                             team = Claude Team standard seat (= pro)")
+        print("                           Precedence: --plan > $KURAKA_CLAUDE_PLAN > the plan")
+        print("                           this project was last mounted with > TTY question > max.")
+        print("                           Recorded in .claude/.kuraka-mount-manifest.json.")
         return 0
     update_mode = False
     target_env_explicit = False
+    plan_arg = None
     i = 0
     while i < len(args_list):
         a = args_list[i]
@@ -622,6 +809,12 @@ def main() -> int:
             i += 1
         elif a in ("--update", "-u", "update"):
             update_mode = True
+            i += 1
+        elif a == "--plan":
+            plan_arg = args_list[i + 1] if i + 1 < len(args_list) else None
+            i += 2
+        elif a.startswith("--plan="):
+            plan_arg = a.split("=", 1)[1]
             i += 1
         else:
             if not target_dir_arg:
@@ -680,7 +873,8 @@ def main() -> int:
                 rc = 0
                 for env in detected:
                     r = _sp.run([sys.executable, str(Path(__file__).resolve()),
-                                 str(target), "--update", "--target", env])
+                                 str(target), "--update", "--target", env]
+                                + (["--plan", plan_arg] if plan_arg else []))
                     rc = max(rc, r.returncode)
                 return rc
 
@@ -705,6 +899,7 @@ def main() -> int:
         platform_dir = target / ".claude"
 
     platform_dir.mkdir(parents=True, exist_ok=True)
+    _init_ownership(target)
     if target_env == "codex" and ensure_codex_agent_config(platform_dir / "config.toml"):
         print("   ✓ .codex/config.toml: límite de 4 subagentes concurrentes")
 
@@ -741,6 +936,36 @@ def main() -> int:
             print("")
         elif choice.lower() == "s":
             menu_mode = "status"
+
+    # Claude account plan -> model column (MODEL-ROUTING.yaml claude_plans).
+    if target_env == "claude":
+        if plan_arg and not kc.normalize_claude_plan(plan_arg):
+            print(f"❌ ERROR: --plan desconocido '{plan_arg}' (usa max | pro | team)", file=sys.stderr)
+            return 1
+        prev_plan = kc.manifest_claude_plan(target)
+        plan = (kc.normalize_claude_plan(plan_arg)
+                or kc.normalize_claude_plan(os.environ.get("KURAKA_CLAUDE_PLAN")))
+        if not plan and tty and menu_mode != "status":
+            default = prev_plan or kc.DEFAULT_CLAUDE_PLAN
+            print("")
+            print("¿Qué cuenta de Claude usa este equipo? (define el modelo de cada agente)")
+            print("   1) max   — Claude Max: Fable en los gates, Opus en juicio/arquitectura")
+            print("   2) pro   — Claude Pro ($20): Sonnet como techo, Haiku en lo mecánico")
+            print("   3) team  — Claude Team (asiento estándar): igual que pro")
+            try:
+                ans = input(f"   [Enter = {default}] > ").strip().lower()
+            except EOFError:
+                ans = ""
+            plan = kc.normalize_claude_plan({"1": "max", "2": "pro", "3": "team"}.get(ans, ans))
+            if ans and not plan:
+                print(f"   ⚠ opción '{ans}' no reconocida → {default}")
+            plan = plan or default
+        plan = kc.set_claude_plan(plan or prev_plan)
+        models = kc.claude_plan_models(VAULT)
+        changed = f"  (antes: {prev_plan})" if prev_plan and prev_plan != plan else ""
+        print(f"   plan Claude: {plan} → frontier={models.get('frontier')} heavy={models.get('heavy')} "
+              f"balanced={models.get('balanced')} fast={models.get('fast')}{changed}")
+        print("")
 
     if tty:
         run_py("kuraka-init.py", "--recommend-only", "--target", str(target))
@@ -798,7 +1023,12 @@ def main() -> int:
             elif category == "agents" and target_env == "codex":
                 sync_codex_agents(src, dst, VAULT)
             else:
-                sync_tree(src, dst, exclude=("*.append.md",), target_env=target_env)
+                excluded = ("*.append.md",)
+                if category == "skills":
+                    unmounted = [n for n in kc.SKILL_PLATFORMS
+                                 if not kc.skill_mounted_on(n, target_env)]
+                    excluded += tuple(unmounted) + tuple(f"{n}.md" for n in unmounted)
+                sync_tree(src, dst, exclude=excluded, target_env=target_env)
             if target_env == "codex" and category == "agents":
                 after = count_codex_agents(dst)
             elif target_env == "codex" and category == "skills":
@@ -816,15 +1046,19 @@ def main() -> int:
     # Claude hook wiring: merge the vault's hook config into settings.json
     if target_env == "claude" and want("agents"):
         merged = merge_claude_hook_settings(platform_dir)
+        hook_file = _OWN.get("hook_file", "settings.json")
         if merged is True:
-            print("   ✓ hooks/  cableados en .claude/settings.json")
-        elif isinstance(merged, str):
+            print(f"   ✓ hooks/  cableados en .claude/{hook_file}")
+        if _OWN.get("hook_file_inplace"):
+            print("   ℹ .claude/settings.json está versionado y ya trae los hooks kuraka commiteados:"
+                  " se actualizan ahí (commiteá el cambio)")
+        if isinstance(merged, str):
             print(f"   ⚠ hooks NO cableados: {merged}")
 
     # Claude managed CLAUDE.md block: always-on evidence rule via @import
     if target_env == "claude" and want("rules"):
         if ensure_claude_md_block(target):
-            print("   ✓ CLAUDE.md — bloque gestionado kuraka (regla 19 siempre activa)")
+            print(f"   ✓ {_OWN.get('claude_md', 'CLAUDE.md')} — bloque gestionado kuraka (regla 19 siempre activa)")
 
     # contexts sub-directory
     if want("agents") and (VAULT / "agents" / "contexts").is_dir():
@@ -833,8 +1067,7 @@ def main() -> int:
 
     # personal rules (meta-rules of the agent system)
     if want("rules"):
-        for rule in ("16-agent-backup.md", "17-kuraka-token-optimizations.md",
-                     "18-duplication-aware-refactor.md", "19-evidence.md"):
+        for rule in sorted(kc.FRAMEWORK_RULES):
             src = VAULT / "rules" / rule
             if src.is_file():
                 copy_file(src, platform_dir / "rules" / rule, target_env=target_env)
@@ -904,6 +1137,10 @@ def main() -> int:
             ".agents/rules/17-kuraka-token-optimizations.md",
             ".agents/rules/18-duplication-aware-refactor.md",
             ".agents/rules/19-evidence.md",
+            ".agents/rules/20-esquema-real-en-tests.md",
+            ".agents/rules/21-gates-vivos.md",
+            ".agents/rules/22-el-error-viaja-entero.md",
+            ".agents/rules/23-mutaciones-con-registro.md",
             ".agents/.kuraka-mount-manifest.json",
             ".agent/workflows/",
             "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
@@ -923,7 +1160,13 @@ def main() -> int:
             ".codex/rules/17-kuraka-token-optimizations.md",
             ".codex/rules/18-duplication-aware-refactor.md",
             ".codex/rules/19-evidence.md",
+            ".codex/rules/20-esquema-real-en-tests.md",
+            ".codex/rules/21-gates-vivos.md",
+            ".codex/rules/22-el-error-viaja-entero.md",
+            ".codex/rules/23-mutaciones-con-registro.md",
             ".codex/.kuraka-mount-manifest.json",
+            "# Ultra Ahorro per-cycle scope/baseline state (ephemeral, per session)",
+            ".codex/ultra-ahorro/",
             "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
             "docs/process/agent-telemetry/*.json",
             "# Tool scratch dirs (never track)",
@@ -941,7 +1184,13 @@ def main() -> int:
             ".claude/rules/17-kuraka-token-optimizations.md",
             ".claude/rules/18-duplication-aware-refactor.md",
             ".claude/rules/19-evidence.md",
+            ".claude/rules/20-esquema-real-en-tests.md",
+            ".claude/rules/21-gates-vivos.md",
+            ".claude/rules/22-el-error-viaja-entero.md",
+            ".claude/rules/23-mutaciones-con-registro.md",
             ".claude/.kuraka-mount-manifest.json",
+            "# Ultra Ahorro per-cycle scope/baseline state (ephemeral, per session)",
+            ".claude/ultra-ahorro/",
             "# Per-cycle telemetry JSONs (noise; the consolidated DASHBOARD.md is tracked)",
             "docs/process/agent-telemetry/*.json",
             "# Tool scratch dirs (never track)",
@@ -949,14 +1198,24 @@ def main() -> int:
             ".pytest_cache/",
         ]
 
-    existing = gitignore.read_text(encoding="utf-8", errors="ignore").splitlines() if gitignore.exists() else []
-    to_add = [p for p in patterns if p not in existing]
-    if to_add:
-        with gitignore.open("a", encoding="utf-8") as fh:
-            for p in to_add:
-                fh.write(p + "\n")
+    extra = [".claude/.kuraka-state-backup.stamp"] if target_env == "claude" else []
+    if _OWN.get("hook_file") == "settings.local.json":
+        extra.append(".claude/settings.local.json")
+    if _OWN.get("claude_md") == "CLAUDE.local.md":
+        extra.append("CLAUDE.local.md")
+    print("")
+    print(write_local_excludes(target, gitignore, patterns + extra))
+
+    if _OWN["skipped"]:
+        xs = _OWN["skipped"]
         print("")
-        print(f"   + {len(to_add)} entradas añadidas a .gitignore")
+        print(f"   ↷ propio del proyecto (versionado) — no se toca: {len(xs)} ruta(s)")
+        for x in xs[:12]:
+            print(f"      · {x}")
+        if len(xs) > 12:
+            print(f"      … y {len(xs) - 12} más")
+        print("     (Kuraka convive: lo que el proyecto versiona manda; el vault no lo pisa ni lo")
+        print("      respalda como override. Para adoptar la versión del vault, quitalo del git del proyecto.)")
 
     print("")
     if update_mode:

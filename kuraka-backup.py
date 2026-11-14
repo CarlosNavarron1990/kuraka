@@ -76,7 +76,38 @@ def update_backup_sidecar(vault: Path, slug: str, branch: str, today: str,
     side.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def diagnose_permission(exc: PermissionError) -> None:
+    """Explain a PermissionError instead of a bare traceback (guai FD-12: 133
+    root-owned files — left by a container run as root — blocked the backup for
+    2 cycles and read as a generic failure)."""
+    path = Path(getattr(exc, "filename", "") or "")
+    owner = "?"
+    try:
+        import pwd
+        target = path if path.exists() else path.parent
+        owner = pwd.getpwuid(target.stat().st_uid).pw_name
+    except Exception:
+        pass
+    me = os.environ.get("USER") or "?"
+    err(f"❌ permiso denegado: {path or exc}")
+    err(f"   dueño: {owner} · usuario actual: {me}")
+    if owner not in ("?", me):
+        top = path.parent if path.name else path
+        err("   Causa típica: archivos creados por un contenedor/proceso como otro usuario (root).")
+        err(f"   Arreglo: sudo chown -R {me} \"{top}\"   (luego re-corré este backup)")
+    else:
+        err("   Revisá los permisos de escritura del destino (vault) y de lectura del origen.")
+
+
 def main() -> int:
+    try:
+        return _main()
+    except PermissionError as exc:
+        diagnose_permission(exc)
+        return 1
+
+
+def _main() -> int:
     ap = argparse.ArgumentParser(description="Snapshot a project's Kuraka state into the vault.")
     ap.add_argument("project", nargs="?", help="consumer project root")
     ap.add_argument("--project", dest="project_opt", help="consumer project root")
@@ -91,6 +122,10 @@ def main() -> int:
     ap.add_argument("--overrides-only", action="store_true", help="only snapshot agent/skill/command overrides")
     ap.add_argument("--skip-overrides", action="store_true",
                     help="do not snapshot platform overrides (used by Codex projection)")
+    ap.add_argument("--state-only", action="store_true",
+                    help="quiet, incremental snapshot of layer + docs/process (incl. telemetry) "
+                         "only — no cycles, no overrides, no closure check. Used by the "
+                         "state_backup hook so an UNCLOSED cycle still reaches the store")
     ap.add_argument("--force", action="store_true", help="re-copy cycles already present")
     ap.add_argument("--allow-incomplete-retro", action="store_true",
                     help="archive a cycle whose RETRO has no `## Confidence:` line "
@@ -143,6 +178,25 @@ def main() -> int:
         if (project / p_dir / "project").is_dir() or platform != "claude":
             layer_root = f"{p_dir}/project"
 
+    # --state-only: the continuous backup. Phase 7 used to be the ONLY moment the
+    # store saw a cycle, so a cycle that never closed (azure REQ-20261110-GUAI-3141:
+    # REQ + 6 stories + test plan, no RETRO) left nothing behind when its files
+    # were then swept into a git stash. Quiet, incremental, never deletes, never
+    # judges closure. Writes only into an EXISTING store entry (registered
+    # project) so a throwaway target leaves no trace in projects/.
+    if args.state_only:
+        if not kc.registry_note(vault, slug).is_file():
+            return 0
+        docs_root = args.docs_root
+        if docs_root == "docs/process":
+            docs_root = kc.config_docs_root(project, docs_root)
+        n_layer = kc.snapshot_tree_incremental(project / layer_root, kc.layer_dir(vault, slug))
+        n_state = kc.snapshot_tree_incremental(project / docs_root,
+                                               kc.state_dir(vault, slug) / "docs-process")
+        if n_layer or n_state:
+            print(f"🗄️  kuraka-backup --state-only · {slug}: layer +{n_layer}, state +{n_state}")
+        return 0
+
     print(f"🗄️  kuraka-backup · {slug}  (rama: {branch}, plataforma: {platform})")
     print(f"   proyecto: {project}")
     print(f"   destino:  {kc.project_dir(vault, slug)}/")
@@ -175,12 +229,18 @@ def main() -> int:
         state_src = project / args.docs_root
         n_state = kc.snapshot_tree(state_src, kc.state_dir(vault, slug) / "docs-process")
         print(f"   state/  ← {args.docs_root}/   ({n_state} archivos)")
+        # instruments = project-owned rules + untracked scripts (gitignored
+        # <platform>/rules and scripts/ outside git are lost on a branch switch)
+        n_ins = kc.snapshot_instruments(project, vault, slug, platform=platform)
+        print(f"   rules/ + scripts/ ← instrumentos del proyecto "
+              f"({n_ins.get('rules', 0)} regla(s), {n_ins.get('scripts', 0)} script(s) fuera de git)")
 
     rows = kc.archive_cycles(project, vault, slug, branch, args.docs_root, args.force)
     n_arch = sum(1 for r in rows if r["status"] == "archived")
+    n_upd = sum(1 for r in rows if r["status"] == "updated")
     added = kc.update_index(vault, rows, slug, args.force)
-    print(f"   cycles/ ← {n_arch} ciclo(s) nuevo(s) "
-          f"({len(rows) - n_arch} ya estaban), {added} fila(s) en INDEX.md")
+    print(f"   cycles/ ← {n_arch} ciclo(s) nuevo(s), {n_upd} actualizado(s) (RETRO/telemetría "
+          f"cambiaron), {len(rows) - n_arch - n_upd} sin cambios; {added} fila(s) en INDEX.md")
 
     # overrides = project-specific agent/skill/command tunings (diverge from vault)
     if args.skip_overrides:
@@ -211,7 +271,7 @@ def main() -> int:
         m = kc.cycles_dir(vault, slug) / req / "meta.yaml"
         return m.read_text(encoding="utf-8", errors="ignore") if m.is_file() else ""
 
-    to_check = {r["req"] for r in rows if r["status"] == "archived"}
+    to_check = {r["req"] for r in rows if r["status"] in ("archived", "updated")}
     latest = kc.latest_cycle(vault, slug)
     if latest:
         to_check.add(latest)
@@ -238,6 +298,14 @@ def main() -> int:
         err("   Excepción deliberada: --allow-incomplete-retro")
         return 1
 
+    if to_check and not no_verdict:
+        print(f"   cierre validado: {len(to_check)} ciclo(s) con veredicto "
+              f"({', '.join(sorted(to_check)[:3])}{' …' if len(to_check) > 3 else ''})")
+    elif no_verdict:
+        print(f"   cierre NO validado ({len(no_verdict)} sin veredicto; --allow-incomplete-retro)")
+    else:
+        print("   cierre: nada que validar (ningún ciclo nuevo ni en el store) — "
+              "esto NO es un ciclo validado")
     print(f"✅ backup completo de {slug} (rama {branch}).")
     return 0
 

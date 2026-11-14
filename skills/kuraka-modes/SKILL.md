@@ -1,15 +1,18 @@
 ---
 name: kuraka-modes
-description: "Kuraka workflow variants (Bootstrap, Brownfield, Lite, Retroactive, Reduced-by-risk). Defines when to use each based on project type or change surface."
+description: "Kuraka workflow variants (Bootstrap, Brownfield, Ultra Ahorro, Lite, Retroactive, Reduced-by-risk). Defines when to use each based on project type or change surface."
 disable-model-invocation: true
 user-invocable: false
 ---
 
 # Kuraka — Modes
 
-This file describes the variants of the main flow (`kuraka.md`). The
-default for incremental changes in an existing project is **Normal**
-(8 phases). The **Bootstrap** and **Brownfield** modes are entry points:
+This file describes the variants of the main flow (`kuraka.md`). For an
+incremental change in an existing project the pipeline is built **UP from
+Lite**, escalating only on a named trigger — **Normal (8 phases) is the
+ceiling, not the starting point** (see `kuraka.md` §Initial decision and
+`rules/17` T13: a cycle costs ~150K per agent invocation, so the mode IS the
+budget). The **Bootstrap** and **Brownfield** modes are entry points:
 used **once** at the start of a new project or when integrating Kuraka
 into a pre-existing codebase.
 
@@ -20,7 +23,8 @@ into a pre-existing codebase.
 | **Brownfield** | Existing project without Kuraka | `kuraka-inspect` → `amauta` → Normal Kuraka |
 | **Normal** | Change in a project with Kuraka already integrated | 8 phases (see `kuraka.md`) |
 | **Reduced by risk** | Narrow change of low complexity | 3–5 phases |
-| **Lite** | Trivial change (9 strict criteria) | 3 phases |
+| **Lite** | Change with no schema / contract / auth / integration surface (7 criteria) | 3 phases |
+| **Ultra Ahorro** | User-selected. One localized low-risk task in an integrated project | 0 agents — direct execution |
 | **Retroactive** | Code already implemented without Kuraka (anti-pattern) | 4 phases |
 | **Deletion cycle** | Removing code / config / a dead path | Normal, with proof-of-death gates |
 | **Partial-smoke** (front-ready / backend-pending) | Frontend done but its backend endpoint isn't deployed yet | Normal, smoke verdict pre-declared partial |
@@ -169,6 +173,11 @@ in code, marking it as TODO is better than fabricating it.
 **Rule**: propose the pipeline to the user with a table justifying each
 omitted phase. Don't assume; ask before invoking agents.
 
+**Spec-first in Reduced**: whenever the pipeline includes Phase 4 on a change
+with new or changed behavior (anything but a pure restyle / rename / type
+tightening), Phase 3.95 (`test-engineer` TEST_FIRST — acceptance tests RED
+from the plan's oracles, locked) runs before it and replaces Phase 6.
+
 **Do NOT use this mode** for changes that touch business logic, API
 contracts, DB, auth, or integrations — Normal is mandatory there.
 
@@ -179,23 +188,32 @@ applicable in any mode.
 
 ## Mode: Lite (trivial changes, strict criteria)
 
-> ⚠️ EXCLUSIVE mode for trivial changes that meet ALL 9 criteria below.
-> If any fails → use Normal or Reduced-by-risk. Do not use Lite to save
-> time on normal changes.
+> ⚠️ Mode for changes that meet ALL 7 criteria below. If any fails → use
+> Reduced-by-risk or Normal. Do not use Lite to save time on a change that
+> carries one of the prohibited surfaces.
 
-### MANDATORY criteria
+### MANDATORY criteria (v2 — recalibrated 2026-09-11)
 
-- [ ] **≤ 3 source files affected**
-- [ ] **0 DB migrations**
-- [ ] **0 new endpoints** (only modifies existing or doesn't touch endpoints)
-- [ ] **0 SQL schema changes**
-- [ ] **0 API contract changes** (request/response stable)
-- [ ] **No impact on auth or permissions**
-- [ ] **No changes to security code** (auth, encryption, tokens)
-- [ ] **No changes to integrations**
-- [ ] **Complexity S — ≤ 50 LOC total**
+The v1 criteria (≤3 files, ≤50 LOC) qualified **0 of 100** archived cycles: a
+mode nothing can reach saves nothing. The ceiling now sits where the risk
+actually lives — the **surface**, not the line count:
+
+- [ ] **≤ 8 source files affected**
+- [ ] **≤ 200 LOC total**
+- [ ] **0 DB migrations / 0 SQL schema changes**
+- [ ] **0 new endpoints** (modifying an existing one is allowed only if its request/response stays stable)
+- [ ] **0 API contract changes**
+- [ ] **No impact on auth, permissions, or security code** (auth, encryption, tokens)
+- [ ] **No changes to integrations / provider code**
 
 If ANY fails → **NOT Lite**.
+
+**What moved, and what did not**: the size ceilings grew (3→8 files, 50→200
+LOC). The *surface* prohibitions — DB, contract, auth, integrations — did not
+move a millimetre: they are precisely what makes the omitted phases safe to
+omit, and they are non-negotiable. A 180-LOC change across 7 files touching no
+schema, no contract and no auth is exactly as safe in 3 phases as a 40-LOC
+one; v1 excluded it only because it used size as a proxy for risk.
 
 ### Cases that NEVER qualify
 
@@ -214,6 +232,14 @@ If ANY fails → **NOT Lite**.
 | L1 | `po-analyst` (mode: LITE_COMBINED) | Phase 1 + 2 + 2.5 |
 | L2 | `backend-developer` / `frontend-developer` | Phase 4 |
 | L3 | `code-reviewer` (+ the L2 agent for any missing tests) | Phase 3 + 5 + 6 + 7 |
+| L2.5 | `e2e-tester` — recorrido (`recorrido-e2e`) | Phase 6.8 smoke, **only when the change is user-visible** |
+
+**User-visible Lite change = 4 invocations (~600K), not 3.** The recorrido is
+the 6.8 smoke for any change a user can see: L1 emits the RECORRIDO table in
+its test plan, `e2e-tester` walks it in a real browser after L2 (UI +
+backend re-fetch per step), and a FAIL goes back to L2 with the same spec
+re-run. Announce the 4th invocation in the mode menu; never drop it to stay
+at 3 — the smoke→fix→smoke loop by hand costs more than one invocation.
 
 **Phases omitted** (justification inherent to the mode):
 - Phase 3 (Architect) — L3 review covers it.
@@ -235,7 +261,7 @@ all-in-one with:
 - Minimum test plan embedded.
 - Confidence.
 
-Gate: user approves the REQ-LITE.
+Gate: REQ-LITE matches the authorized scope and has no unresolved blockers.
 
 ### L2 — Implementation
 
@@ -244,12 +270,23 @@ Agent: `backend-developer` or `frontend-developer` (whichever applies).
 Implements stories sequentially. If there's backend + frontend, both are
 invoked (backend first if there's a contract). Each runs its checks.
 
-Gate: files modified + tests passing.
+**Test first, inside the same invocation (TDD).** Lite has no separate tester,
+so the L2 agent FIRST writes the acceptance test(s) from the oracle rows of the
+`REQ-LITE-*.md` (input → expected + source) — without writing production code
+yet — runs them and pastes the RED evidence (failing assertion, not an import
+error), locks them (`kuraka-testlock.py lock`), and only then implements until
+they are green. The expected value comes from the REQ-LITE, never from the code
+it is about to write. A value the REQ-LITE does not determine → stop and ask.
+
+Gate: files modified + locked tests green (red evidence shown first) +
+`kuraka-testlock.py verify` exit 0.
 
 ### L3 — Review + Audit
 
 Agent: `code-reviewer` (mode: LITE_FINAL). A single invocation does:
-1. 6D code review.
+1. 6D code review, including: the RED-first evidence from L2 exists for every
+   acceptance test, each expected value cites the REQ-LITE oracle, and no
+   locked test changed without an `unlock` record (else BLOCKER).
 2. List any missing tests as findings with a concrete one-line assertion
    each. The reviewer does NOT write the tests (its harness denies
    Write/Edit, and a reviewer authoring the tests it then approves breaks
@@ -268,14 +305,27 @@ Gate: findings resolved.
 ## Workflow Status (Lite)
 - [x] Lite Criteria: 9/9 VERIFIED ✓
 - [ ] L1: REQ-LITE + Stories + Test Plan
-- [ ] L2: Implementation
+- [ ] L2: Implementation — acceptance test(s) RED first (evidence) + locked, then green
+- [ ] L2.5: Recorrido (user-visible change) — RECORRIDO-<REQ>.md verdict
 - [ ] L3: Review + Tests + Audit
+- [ ] 6.9: User validation — `kuraka-ajuste.py aceptar` (rounds · adjustments · faltó)
+- [ ] Backup — `kuraka-backup.py` exit 0
 ```
+
+**Phase 6.9 (user validation) is never cut, in any mode** — see `kuraka.md`
+§Phase 6.9. It costs ~0 tokens (a script writes the ledger) and it is the only
+measure of whether the cycle delivered what the user wanted.
 
 ### Expected saving (historical data)
 
-Typical Lite cycle: ~70% token reduction vs Normal, ~3× faster duration,
-fewer approval gates (3 vs 8).
+Target: **~450K tokens** (3 invocations × the measured ~150K floor per
+subagent) against a **median 1.81M** for a Normal cycle — ~75% reduction,
+~3× faster, 3 technical gates instead of 8.
+
+Baseline for v2, from the 100 archived cycles at the time of recalibration:
+Normal median 1.81M / 13 runs, Reduced median 601K / 6 runs, Lite 0 cycles.
+If Lite stays at 0 uses after a few cycles under v2, the criteria are still
+wrong — reopen them rather than quietly returning to Normal.
 
 ### Golden rule
 
@@ -293,6 +343,49 @@ expected (e.g., requires a new column):
    to escalate. Proceed?"
 3. Revert if necessary.
 4. Re-start at Phase 1 of Normal with the known context.
+
+---
+
+## Mode: Ultra Ahorro (direct execution, zero subagents)
+
+**This mode is never proposed by the pipeline-building logic above — the user
+selects it.** Entry: `/kuraka-ahorro <tarea>`, `/kuraka <tarea> --modo
+ultra-ahorro`, or `workflow.default_mode: ultra-ahorro`. The full definition
+lives in `kuraka-ahorro.md`; this section only places it among the modes.
+
+The main session analyses, implements and verifies a single localized task. No
+subagent runs, so there are **no phases, no gates and no independent review**:
+the executor reviews its own work. That is the trade the user accepted when
+selecting it — do not present its output as a delegated cycle's coverage.
+
+| | Lite | Ultra Ahorro |
+|---|---|---|
+| Agent invocations | 3 | 0 |
+| Independent review | yes (`code-reviewer`) | **no** — same executor |
+| Gates | 3 | none; the verification commands are the verdict |
+| Process artifacts | REQ + story + RETRO + telemetry | one RETRO + telemetry |
+| Chooses it | the orchestrator, by criteria | **the user**, explicitly |
+
+Eligibility is Lite's safety criteria plus a tighter surface: one implementation
+layer and its tests, no schema/contract/auth/integration/deploy/global-state
+change, and reevaluation above 5 files or 200 changed lines. **If you doubt
+whether it qualifies → it does not.** Lite remains the cheapest mode that still
+provides independent review; Ultra Ahorro is for when the user judges that
+review is not worth its cost on this particular change.
+
+**User validation still applies**: when the user confirms the result, record
+it in one line — `kuraka-ajuste.py aceptar <root> --req <id>` (or `add` for each
+adjustment they ask for, verbatim). Zero tokens; it is how an Ultra Ahorro
+change shows up in the effectiveness numbers instead of vanishing.
+
+Escalation is the same rule as Lite: the moment the change stops qualifying,
+stop, say so, and let the user choose the mode — never widen it silently, and
+never spawn an agent from inside the mode to get around a difficulty.
+
+Expected saving is **not yet measured**. Zero invocations is a fact of the
+design; the token saving per cycle is not, and no percentage should be quoted
+until piloted cycles exist. See `kuraka-ahorro.md` §5 on recording unknown
+usage as `null` rather than `0`.
 
 ---
 
@@ -323,7 +416,7 @@ cases (not fabricated).
 
 Output: REQ + stories + test plan (same locations as Normal mode).
 
-Gate: user approves everything before R2.
+Gate: artifacts match the authorized scope and have no unresolved blockers before R2.
 
 ### R2 — Combined Review
 
@@ -357,6 +450,7 @@ repetition).
 - [ ] R1: PO + Stories + Test Plan
 - [ ] R2: Combined Review
 - [ ] R3: Test Validation
+- [ ] 6.9: User validation — `kuraka-ajuste.py aceptar`
 - [ ] R4: Final Audit
 ```
 

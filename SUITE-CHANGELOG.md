@@ -27,6 +27,255 @@ que con la N = la integración funcionó.
 
 ## Sin publicar (pendiente de bump por `/kuraka-harvest`)
 
+_(vacío)_
+
+---
+
+## [1.2.0] — 2026-11-14 (segundo harvest)
+
+Fuentes: ~260 RETROs nuevos desde 2026-08-01, 14 proyectos con material (capa +
+overrides). Todo lo que estaba en "Sin publicar" (Lite v2, Ultra Ahorro, olas de
+integración Claude, doctor/merge, overrides por plataforma, reglas 20–23…) entra
+también en esta versión; sus entradas siguen debajo, tal como se escribieron.
+
+### Corregido — regresión de `8a9fe8b` (2026-08-12)
+- **`rules/16-agent-backup.md`** restaurada: `8a9fe8b` la había devuelto a la
+  versión sie_v2 con `rsync -a --delete` hacia el vault compartido, montada en
+  todos los proyectos (kuraka-control FD-16 en 8 RETROs; sie-integraciones FD-5).
+  Vuelve a: solo el orquestador, solo `kuraka-backup.py`, nunca `--delete`.
+- **`kuraka-policies`**: repuestas "Role lock", "Git is READ-ONLY for
+  review/verify subagents (HARD)" y "RTK token saver" (P2 de 1.1.0); guai las
+  parcheaba a mano en 9/11 appends tras un `git merge` real lanzado por un revisor.
+- **`rules/17`**: repuestos P4 (re-scope invalida el digest), P5 (T10.b/c),
+  P6 (entorno de la reproducción). **`skills/kuraka.md`**: repuestos P7 (re-sondeo
+  de entorno por gate en 3.9), P12 (smoke del usuario como gate, `PENDING-SMOKE`),
+  P15 (contratos congelados nunca parafraseados; configs con su parser real).
+- **`kuraka-mount.py` montaba solo las reglas 16–19**: las 20–23 (commit
+  `2964226`) nunca llegaron a ningún proyecto aunque 3 agentes citan `rules/23`.
+  La lista vive ahora en `kuraka_common.FRAMEWORK_RULES` (mount + gitignore + doctor).
+- **`commands/run-tests.md`, `clean-cases.md`**: sin `cd sie_v2`; raíz del repo / config.
+
+### Corregido — infraestructura
+- **`hooks/telemetry_append.py`** — `total_tokens`/`duration_ms` salían null en
+  el 100% de las filas (guai, azure 77/77, possuite 81/81, sie-integraciones,
+  petsuite, piscosdalston, editorial): `extract_usage()` lee el uso estructurado
+  (camelCase/snake_case/`<usage>`) antes del regex. `kuraka-doctor` avisa si el
+  HOOK-LOG es todo-null (hoy: 7 proyectos).
+- **`aggregate-telemetry.py`** — etiquetas `1+2+2.5` acreditan cada fase
+  (editorial 9/9, piscosdalston: deudas falsas 39→10 y 4→1); fases del
+  orquestador cubiertas por una entrada `agent: orchestrator*`; `"unknown"` ya no
+  rompe el script (guai FD-13); `budget_ok` calculado contra los topes S/M/L.
+- **`hooks/gate_integrity.py`** — detección de pipe limitada al segmento del gate
+  (`;`, `&&`, `||`, salto de línea) y consciente de comillas (guai FD-8 en 5
+  ciclos, editorial F-1, kuraka-control FP-1); `TODO`/`TBD`/vacío no es gate (azure FD-5).
+- **`kuraka_common.archive_cycles`** — re-copia cuando el contenido cambió
+  (possuite FD-4, sie-integraciones FD-7: un RETRO corregido se perdía con exit 0).
+- **`kuraka-backup.py`** — respalda instrumentos del proyecto (`rules/` propias,
+  `scripts/` fuera de git) en `projects/<slug>/{rules,scripts}/`; diagnóstico de
+  `PermissionError` con dueño + `chown` (guai FD-12); separa "validado" de "nada
+  que validar". **`kuraka-doctor`**: hallazgos `[instruments]` (guai FD-1/4, 11
+  ciclos) y `[gates]` de relleno.
+- **`RETRO-LATEST`** con `ln -sfn`, nunca `cp` sobre el symlink (`final-auditor`,
+  `run-audit`) — un stub de 166 B pisó un RETRO de 31 KB (guai FD-16, 2 incidentes).
+- **`rules/17` T7.1** sin comandos de gate de un proyecto: se leen del config
+  (possuite FD-1, azure FD-8). Escrita la sección **"Definition of green"** que
+  `rules/17` citaba y no existía (guai FD-6): `gates_measured_at` = HEAD,
+  recrear contenedores tras cambio de dependencias, un runner por host.
+
+### Añadido
+- **Agent binding (HARD)** en `skills/kuraka.md` + `commands/kuraka.md` +
+  check de `final-auditor`: `subagent_type` exacto, nunca genérico, sin `model:`
+  (possuite, sie-v2 DD-1530: todas las fases como `general-purpose`).
+- **`agents/contexts/subagent-hygiene.md`** — contrato transversal: sin
+  recursión a kuraka, git solo-lectura para revisores, scratchpad propio,
+  ningún job en background al cerrar, nunca texto con forma de notificación,
+  `test -s` del output, exits literales (guai, editorial F-9/F-21).
+- **`llimpi`** (`commands/llimpi.md` + `skills/llimpi.md`, solo forma plana por
+  colisión de nombre) — paso greenfield inti → arki → llimpi → kuraka: prototipo
+  con ficha por pantalla + plan `docs/plan/vN/` con un prompt por ciclo y tabla
+  de cobertura verificada (editorialcesarvallejo). Ruteo en `arki` y `kuraka-wizard`.
+- **`validar-pr`** (skill + `scripts/`, solo Claude) + **`hooks/pr_gate.py`** —
+  gate local previo al PR con revisor ciego y catálogo `errores-tipicos` que
+  crece; el hook bloquea `gh pr create` sin APROBABLE para HEAD. Inerte salvo
+  adopción (`.claude/project/validar-pr/config.sh`). Origen: sie-integraciones +
+  azure (idéntico en 4 repos).
+- **`agents/pr-writer.md`** generalizado (rama base de config/`origin/HEAD`,
+  "Verificación" desde el informe de validar-pr) + `AGENT-HARNESS` + sync arrays.
+- **`config-schema`**: `workflow.commit_policy: orchestrator|user`,
+  `workflow.base_branch`, `workflow.validar_pr.*` (retrocompatible,
+  `schema_version: 1`). La Fase 4 respeta `commit_policy` (azure FD-18, aws).
+- **Fase 6.9 — validación del usuario y efectividad** (obligatoria en todo
+  modo) + `kuraka-ajuste.py` (0 tokens): cada ajuste que pide el usuario al
+  probar se registra textual contra el ciclo EN CURSO (`ajustes/AJUSTES-<REQ>`),
+  clasificado (`falto-preguntar` / `falto-hacer` / `bug` / `ux` /
+  `cambio-alcance` / `entorno`) y con la fase/agente que debió detectarlo; se
+  resuelve con delta + re-corrida del mismo recorrido, por rondas, y el ciclo
+  cierra solo con `aceptar` (o `cerrar --motivo`). Al aceptar, la fase 7 corre
+  en la misma sesión (el doctor encontró ~100 ciclos abiertos sin RETRO). El
+  RETRO gana `## Efectividad`: cada `falto-*` se vuelve un parche a la capa del
+  proyecto marcado `harvest-candidate`; `archive_cycles` copia el ledger y
+  estampa `aceptacion` / `ajustes_total` / `ajustes_falto` en `meta.yaml`; el
+  doctor marca "aceptado, falta solo la fase 7"; el DASHBOARD suma la tabla de
+  efectividad y `/kuraka-harvest` agrupa los `falto-*` por `debio` entre
+  proyectos y mide la tasa de aceptación en primera ronda por versión.
+- **Convivencia con los lineamientos del proyecto** (azure, 2026-11-14) — el
+  mount/restore NUNCA sobrescribe un archivo versionado por el proyecto (lo
+  lista como "propio del proyecto"); una skill que el proyecto versiona
+  (azure `validar-pr`, `security-audit`) se salta entera; ignores en
+  `.git/info/exclude` en vez de `.gitignore`; hooks en `settings.local.json` y
+  bloque gestionado en `CLAUDE.local.md` cuando los originales están
+  versionados. `skills/kuraka.md` §Project guidelines win: usuario > proyecto >
+  defaults Kuraka. Causa: GitHub Desktop stasheó en cada cambio de rama el
+  `.gitignore` sin commitear y con él todo el estado Kuraka (17 stashes,
+  2294 archivos en azure); el ciclo GUAI-3141 quedó sin cerrar e invisible.
+- **Backup continuo** — `kuraka-backup.py --state-only` + hook `state_backup.py`
+  (SubagentStop/Stop, cada ≤10 min, fail-open): el estado llega al store aunque
+  el ciclo no cierre. **`kuraka-doctor`**: `[cycles]` (REQ abierto sin RETRO
+  >24 h), `[stash]` (estado Kuraka atrapado en stashes, con comando de
+  recuperación), `[gitignore]` (bloque Kuraka sin commitear).
+- **`validar-pr` re-basado en la versión de azure** — `validar-push.sh`,
+  `instalar-hooks.sh`, baterías `test-validar-pr.sh` / `test-hook-claude.sh`,
+  `stack.sh url`, modelo del revisor según el plan Claude montado; `pr_gate.py`
+  con semántica azure (falla cerrado en `gh pr`/`push` ilegible) e inerte si el
+  proyecto trae su propio validar-pr.
+- **`recorrido-e2e`** (skill + plantillas) — la fase 6.8 de todo cambio visible
+  ejecuta en un navegador real la tabla `## Recorrido` del plan de pruebas (una
+  fila por AC + la frase de resultado): spec Playwright determinista que asevera
+  UI **y** efecto en API/BD por paso, con trace/capturas/video, sobre el stack
+  aislado de validar-pr; FAIL → historia de fix y se re-corre el MISMO spec; la
+  6.5 lo promueve a regresión. `plan-tests` / `po-analyst` emiten la tabla;
+  Lite suma L2.5 para cambios visibles.
+- **Tests desde la especificación, no desde el código** — el plan de pruebas
+  lleva el ORÁCULO de cada caso (entrada → valor esperado + fuente: AC / REQ /
+  contrato / regla) y lo marca `ACCEPTANCE` o `INTERNAL`; un valor que la
+  especificación no fija es pregunta GATE0. Nueva **fase 3.95**: `test-engineer`
+  `TEST_FIRST` escribe los tests de aceptación ROJOS antes de implementar (sin
+  leer el código bajo cambio) y los bloquea con **`kuraka-testlock.py`**; la fase
+  4 los pone en verde sin poder editarlos (`conflicto de especificación` →
+  `unlock` aprobado por el usuario); la fase 6 queda condicional (huecos +
+  INTERNAL) y lee el código solo para saber QUÉ falta, nunca QUÉ esperar. Lite:
+  el L2 hace TDD en la misma invocación. `code-reviewer`: expectativa sin fuente
+  = tautológica; test bloqueado cambiado sin unlock = BLOCKER. Mueve la
+  invocación del tester antes del código: mismo número de invocaciones en Normal.
+- **Plan de cuenta Claude por mount** — `kuraka-mount.py --plan max|pro|team`
+  (también `kuraka mount --plan`, `$KURAKA_CLAUDE_PLAN`, el plan del último mount
+  o la pregunta en TTY; default `max`). `MODEL-ROUTING.yaml` gana `claude_plans:`:
+  `max` = Fable en gates / Opus en juicio (la columna del vault, copia
+  byte-idéntica); `pro` ($20) y `team` (asiento estándar) = techo Sonnet + Haiku
+  mecánico (el ruteo con el que corrían guai-agents-platform-azure y sie). Se
+  reescribe solo la línea `model:` de los agentes dentro de `render_for_platform`
+  y el plan queda en el manifest, así que un mount pro no aparece como overrides.
+  La columna `claude` vuelve a fable/opus/sonnet/haiku (se deshace la subida
+  sin commitear del 2026-11-04: balanced→opus, fast→sonnet). Tests:
+  `tests-vault/test_claude_plans.py`; el test estructural del consumidor lee el plan
+  del manifest.
+- **Presupuesto por talla S/M/L** (fases 2, 2.5, 3, 4a, 4b, 6) + variantes
+  declaradas `1+2+2.5` y `3+probe` (×1.3) en `kuraka-policies` (petsuite 5 retros,
+  piscosdalston FD-2).
+
+### Cambiado — agentes
+- **Evidencia**: "probar el test" (mutar → rojo → verde) en backend/frontend/
+  test-engineer, todo guard con su test de mutación (editorial F-13, guai,
+  piscosdalston); techo de turnos del harness (`kuraka-policies` §Tool use
+  limits; story-refiner parte historias >~15 archivos / >2 capas — editorial
+  F-16, guai FD-15); un runner por host (editorial F-15, 5 retros).
+- **`rules/19` R-CONTROL 5–8**: control por la misma cadena de filtros, spy
+  negativo con gemelo positivo (kuraka-control FP-9), cardinalidad con universo
+  medido (guai FD-2, 6 ciclos), higiene de instrumentos zsh (possuite, sie-int).
+  **`rules/21`**: un detector que enumera formas falla cerrado ante una desconocida.
+- **Revisores**: BLOCKER nombra el invariante y prueba que no es preexistente;
+  historial antes de diferir (diferido ≥2 → se corrige); rutas de error con
+  estado previo; ruta de error nueva = superficie de ataque; seguridad por clase
+  de amenaza (guai FD-14, petsuite, kuraka-control LL-008). `architect-reviewer`
+  E7–E10: `Literal`/enum declarado, modelo de identidad como pregunta bloqueante,
+  reusar antes de crear, códigos HTTP desde el mapa de excepciones.
+- **Honestidad de verificación**: e2e-tester sin verde por debilitamiento,
+  `PASS PARCIAL — n/m`, causas de entorno solo con medición; deployment-verifier
+  `NOT VERIFIED` literal; developers paran ante contrato faltante y reportan el
+  exit literal del gate (petsuite, guai, sie-integraciones FD-1).
+- **Orquestador**: Workflow Status desde `phases_completed` (3.9/6.8/7 no se
+  quitan, azure FD-7); Fase 3.9 lee convenciones `applies_to: orchestrator` /
+  `environment-traps` y nunca reutiliza la línea base de otro ciclo (azure FD-20, editorial F-31).
+- **Telemetría**: prohibido el auto-reporte de tokens/tool uses (`output-schemas`,
+  `kuraka-policies`) — subestimaba en 3/10 y 6/7 corridas (azure, possuite, petsuite).
+
+### Store (higiene del harvest)
+- 371 `._*` borrados; overrides STALE eliminados (adela, dbcanvas, bol-cert,
+  trackingunidades, wacertificado, guai-home, petsuite, piscosdalston, 4 de
+  camisassis, sie-int `jira-ticket-sync`, possuite `kuraka`); 7 entradas de
+  prueba (`/private/tmp`) borradas; `remediation-20260921-transaction-uow`
+  (copia mal nombrada, mismos 85 ciclos) fusionado en `guai-home-marketplace`
+  conservando sus 6 RETROs más completos. Respaldos:
+  `projects/_harvest-trash-20261114.tar.gz`, `projects/_harvest-merge-guai-originals-20261114.tar.gz`.
+
+### Dejado como tuning (no integrado)
+- possuite `hallmark` (licencia por verificar) y `pos-*-auditor`; camisassis
+  `vercel-react-best-practices` / `frontend-design`; skills de ops SIE.
+
+### Resultados (llenado por harvests futuros)
+- _pendiente_
+
+---
+
+## Cambios previos sin publicar, integrados en 1.2.0
+
+Cambios 2026-09-14 — **Ultra Ahorro para Claude Code** (sobre la entrega Codex
+del mismo día). El modo mínimo anterior (Lite, 3 invocaciones) no daba ahorro
+suficiente, así que la variante Claude se construyó sobre el harness nativo en
+lugar de replicar el helper de Codex:
+
+- `skills/kuraka-ahorro.md` pasa a ser el superset Claude del vault: frontmatter
+  `model: sonnet` + `effort: medium` + `disallowed-tools: Task`. Cero subagentes
+  deja de ser prosa — la herramienta de delegación no está en el pool mientras el
+  modo corre. (Los spawns de subagente no pasan por `PreToolUse`, así que el
+  "guard de delegación" que proponía el diseño no era implementable como hook.)
+- `hooks/orchestrator_guard.py` gana la excepción del modo: escribe bajo las
+  raíces de código solo los archivos declarados en
+  `.claude/ultra-ahorro/<ciclo>.json`, con el ciclo atado a la `session_id` real
+  del payload (`<ciclo>.owner`, O_EXCL) — por archivo y por sesión, nunca un
+  allow-file global. Estado no `active`, corrupto, de otra sesión o con rutas
+  escapadas no concede nada. El escape `ALLOW-ORCH-WRITE` sigue igual.
+- Entradas: `/kuraka-ahorro <tarea>` (la skill ES la entrada) y el corto-circuito
+  del paso 0 de `commands/kuraka.md`, que rutea antes de leer los tres documentos
+  del pipeline. `kuraka-modes.md` ubica el modo y contrasta explícitamente con
+  Lite (Lite conserva revisión independiente; Ultra Ahorro no).
+- Montaje por plataforma: `SKILL_PLATFORMS` / `SKILL_ASSET_PLATFORMS` reemplazan
+  a `CODEX_ONLY_SKILLS`. Claude recibe la skill pero **no** el helper de Codex;
+  Codex recibe ambos; Cursor y Antigravity no reciben el modo. `.claude/` y
+  `.codex/ultra-ahorro/` se agregan al `.gitignore` del consumidor.
+- Config: `default_mode` acepta `ultra-ahorro` y se agrega el bloque opcional
+  `workflow.ultra_ahorro` (enabled + tres umbrales + aviso de contexto) en ambos
+  esquemas. Todo opcional; las configs anteriores siguen validando.
+- **Bug preexistente corregido**: la proyección Codex de skills (`codex_skill_text`)
+  no expandía los marcadores `<!-- kuraka:discipline:… -->`, así que Codex era la
+  única plataforma que recibía el marcador crudo en vez de la prosa manual —
+  afectaba también a `kuraka-policies`. Ahora expande, como todo render no-Claude.
+- Validación: 145 tests del vault (28 nuevos en `tests-vault/test_claude_ultra_ahorro.py`),
+  harness del consumidor 26 passed / 7 skipped sobre un fixture montado de verdad,
+  `validate-kuraka.sh` sin errores, `kuraka-apply-models.py --check` y
+  `kuraka-apply-harness.py --check` sin deriva. **No** se actualizaron proyectos
+  consumidores ni se midió ahorro de cuota en sesiones reales: el piloto de la
+  propuesta (§11) sigue pendiente y hasta entonces no hay porcentaje que publicar.
+
+
+Cambios 2026-09-14 — **Ultra Ahorro para Codex**:
+
+- Nueva skill `$kuraka-ahorro`: ejecución directa sin subagentes, scope de bajo
+  riesgo, verificación local y cierre breve; no modifica modelos ni permisos.
+- `$kuraka` en Codex se convierte en router corto; conserva el flujo delegado en
+  `references/workflow.md`. `workflow.codex_default_mode` es opcional y no afecta
+  a otros targets. `AGENTS.md` exportado declara la excepción de ejecución directa.
+- Helper de ciclo empaquetado con la skill: baseline de archivos, logs de checks,
+  detección de scope/validaciones obsoletas, cierre RETRO + telemetría y abort
+  sin revertir trabajo. El control de delegación es por instrucciones, no un hook.
+- Dashboard distingue consumo desconocido de cero. Montaje/manifest reconocen
+  la referencia generada sin falsos overrides; skill exclusiva de Codex.
+- Validación: 118 tests del vault, incluido montaje Codex y harness consumidor;
+  frontmatter del montaje Claude sin errores/warnings, skill Codex validada,
+  sintaxis Python y `kuraka-apply-models.py --check` correctos. No se actualizaron
+  proyectos consumidores ni se midió todavía ahorro de cuota en sesiones reales.
+
+
 Cambios 2026-09-11 — **recalibración de costo del ciclo**. Origen: agregación de
 la telemetría del store central (100 ciclos archivados, 1197 runs, 160M tokens).
 Motivo: recorte del presupuesto de tokens de Claude del usuario.
@@ -788,8 +1037,21 @@ viejo pese a que cada `--update` reportaba éxito.
 - **P9** `kuraka-mount.py`: `.playwright-mcp/` y `.pytest_cache/` añadidos al
   gitignore que escribe el mount (propuesto en 3 retros de guai).
 
-### Resultados (llenado por harvests futuros)
-- _pendiente — ciclos con `suite_version: 1.1.0` aún no archivados_
+### Resultados (harvest 2026-11-14)
+- **172 ciclos** en 11 proyectos (petsuite 72, guai-home 49, possuite 11,
+  editorial 10, azure 9, kuraka-control 7, sie-integraciones 7, piscosdalston 4,
+  adela/clinica/cuadrante 1) — tras quitar los 85 duplicados de `remediation-…`.
+- **Veredicto**: 113/172 (66%) con línea `## Confidence:` → 90 HIGH (80%),
+  ~23 MEDIUM/MEDIUM-HIGH. 59 sin línea (petsuite 50). Pre-1.1.0: 40/123 (33%).
+  El cierre obligatorio por script (2026-09) se nota: duplica la tasa de veredicto.
+- **Retrabajo**: fix-runs casi en cada ciclo de azure/editorial (13–17 menciones
+  por retro en editorial C08–C09); BLOCKERs tardíos desde el smoke 6.8; runs
+  cortados por el techo de 100 turnos (editorial C06/C09, guai S4 ×3); 7 muertes
+  por límite de sesión en guai; 8 falsos verdes (guai) + 2 (sie-integraciones).
+  Gran parte del ruido de telemetría venía de bugs del framework (hook null,
+  etiquetas `+`, regresión `8a9fe8b`) — corregidos en 1.2.0.
+- **Deuda de framework abierta en los proyectos** (ledgers FD/F/FP) que motivó
+  1.2.0: guai FD-1…16, editorial F-1…32, kuraka-control FD-16/FP-1…11, azure FD-3…26.
 
 ---
 

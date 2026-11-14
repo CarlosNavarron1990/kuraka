@@ -165,8 +165,11 @@ and apply automatically.
 
 ## When Something Goes Wrong
 
-- If a story references a backend endpoint that doesn't exist yet,
-  **STOP and report**.
+- If a story needs a backend contract that doesn't exist yet — an endpoint,
+  a response field, a nested object, or a write path that accepts a value but
+  never persists it — **STOP and route a delta** (report it; the orchestrator
+  re-opens the contract). Never fake the field client-side, derive it from
+  another one, or hide the control (petsuite: debt counted in 3 retros).
 - If types don't match between frontend and backend, **STOP and report**.
 - If implementation would exceed the file LOC limit, **refactor into
   smaller pieces first**.
@@ -179,6 +182,42 @@ told to use one component/pattern but you ship another to keep the build
 green), you MUST: (1) flag the deviation prominently in your run summary,
 (2) state the rationale, (3) state the planned path back to the instructed
 end-state. Never substitute silently — even when the substitution is better.
+
+**Literal gate evidence in the final report.** Quote the exit code of every gate
+you ran, literally (`TYPECHECK_EXIT=<n>`, `TEST_EXIT=<n>`), and write
+`GATE NO EJECUTADO` for any gate you did not run (the full gate is the
+orchestrator's). "Build passes" without the literal exit is invalid
+(sie-integraciones). Run hygiene: `agents/contexts/subagent-hygiene.md`
+(own scratchpad, no background dev server left running, turn ceiling —
+`kuraka-policies` §Turn ceiling).
+
+## Locked acceptance tests (spec first — never edit them)
+
+The acceptance tests of this cycle were written RED before your story, from the
+test plan's oracles (Phase 3.95, or by you first in Lite), and are LOCKED
+(`kuraka-testlock.py`). Your story is done when they are GREEN.
+
+- **Never modify, skip, delete or loosen a locked test** — not its expected
+  value, not its fixture, not by adding an `xfail`/`skip`/`.only`.
+- If one looks wrong (the plan contradicts the frozen contract, or the oracle is
+  impossible), STOP that story and report `conflicto de especificación`: the
+  test, the plan line it comes from, and why. The orchestrator asks the user;
+  only a recorded `unlock` lets it change.
+- New tests you add (internal helpers, the "prove the test" pairs) take their
+  expected value from the plan / AC / business rule and cite it — never from
+  what your code happens to return.
+- Before reporting: `python3 "${KURAKA_VAULT}/kuraka-testlock.py" verify
+  <project-root> --req <REQ>` must exit 0; paste the line.
+
+## Prove the test (red before green)
+
+For every test you add for a fix, guard or negative AC (a disabled button, a
+hidden control, a blocked double-submit): mutate the protected code safely
+(`rules/23-mutaciones-con-registro` — restore with `git checkout --`, then
+`git status --porcelain`), run ONLY that test and see it **red** for the
+expected reason, restore, see it **green**; quote both runs. A guard ships with
+its mutation→failing test in the same story; a simulated double-click that
+passes with the guard removed proves nothing (editorial F-13, guai-home).
 
 ## End at READY-FOR-EXTERNAL-VERIFY (no terminal self-verification)
 

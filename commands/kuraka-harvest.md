@@ -36,6 +36,14 @@ this channel NEVER appears in overrides. Scan per project:
 - `layer/agents/*.append.md` — per-agent additions (the richest source).
 - `layer/lessons-learned/*.md` — frontmatter `applies_to` names target agents.
 - `layer/review-checks/*.md` — checks the team added to reviewer agents.
+- `cycles/*/AJUSTES-*.jsonl` — the Phase 6.9 user-validation ledgers (written
+  by `kuraka-ajuste.py`). **The primary signal of what Kuraka failed to ask or
+  do**: group the `falto-preguntar` / `falto-hacer` events by `debio` (phase +
+  agent) ACROSS projects — the same `debio` in ≥2 projects is a core candidate
+  for a new question/check in that agent. Their verbatim `texto` is the
+  evidence; the RETRO's `harvest-candidate` patches show how each project
+  already fixed it locally. Quick aggregate:
+  `cat projects/*/cycles/*/AJUSTES-*.jsonl | grep -E '"tipo": "falto-(preguntar|hacer)"'`.
 - `cycles/*/RETRO-*.md` archived **since the last harvest** (newest date in
   `SUITE-CHANGELOG.md`) — only the sections proposing agent/framework
   improvements. With many retros, grep-filter first; never read 40 retros whole.
@@ -127,6 +135,11 @@ Wait for the user's selection. Items not approved are recorded in the changelog'
    by `suite_version` — cycles count, verdicts, rework signals from their RETROs
    (late BLOCKERs, re-runs, new overrides that correct the framework). This is how
    versions get compared: less rework in vN+1 than vN = the harvest worked.
+   Add the **first-pass acceptance rate** per version from meta.yaml
+   `aceptacion` (`primera-ronda` / total with a ledger), plus mean
+   `ajustes_total` and `ajustes_falto` — and how many cycles are `sin-registro`
+   (closed without recording the user's validation). A rising first-pass rate
+   is the most direct proof that the harvest made Kuraka ask/do the right things.
 
 ## Step 8 — Close
 

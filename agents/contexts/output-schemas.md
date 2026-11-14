@@ -9,6 +9,14 @@ Every agent output MUST include:
 - `## Confidence: HIGH / MEDIUM / LOW` at the end
 - Explicit reference to which output file(s) were created (full paths)
 - No unexplained TODO/FIXME markers in the produced artifact
+- **No self-reported token / tool-use / duration counts.** Those numbers come ONLY
+  from the harness `usage` block (or the telemetry hook log), which the orchestrator
+  records. An agent's own count is systematically low (azure: below the harness in
+  3/10 and 6/7 runs; piscosdalston, possuite, petsuite same) and then pollutes the
+  telemetry. If a report must mention cost, mark the figure `[ESTIMACIÓN NO MEDIDA]`.
+- Hygiene contract: `agents/contexts/subagent-hygiene.md` (scratchpad, background
+  jobs, declared output exists, no fake notifications, no recursion, read-only git
+  for review/verify agents).
 
 If any requirement is missing, the output is invalid — re-generate before returning.
 
@@ -72,7 +80,7 @@ If any requirement is missing, the output is invalid — re-generate before retu
 1. `# Test Plan: {ticket}`
 2. `## Stories Covered` — list referencing story IDs
 3. `## Testability Constraints` — numbered list
-4. `## Test Cases` — table with #/Story/Function/Test Case/Type/Category
+4. `## Test Cases` — table with #/Story/Function/Test Case/Type/Category/**Input/Expected/Source/Kind** (`Kind` = ACCEPTANCE or INTERNAL; `Source` = AC id, REQ section, frozen-contract line or business rule)
 5. `## Fixtures` — table with Fixture/Source/Purpose
 6. `## Testability Risks` — table with Risk/Story/Impact/Mitigation
 7. `## Estimated Test Count: N`
@@ -83,6 +91,27 @@ If any requirement is missing, the output is invalid — re-generate before retu
 - Every story's AC has at least one test case row
 - Every public function mentioned has 3+ test cases (happy + error + edge)
 - All fixtures either exist in conftest.py or marked as "create new"
+- Every case has a concrete `Expected` value and a `Source`; a case whose value the spec does not fix is listed as an open question, never guessed
+- A user-visible change carries the `## Recorrido` table
+
+---
+
+## test-engineer — TEST_FIRST mode (Phase 3.95)
+
+**Output:** the ACCEPTANCE test files (written from the plan + frozen contract, never from the code under change) + report returned as agent response.
+
+**Required sections:**
+
+1. `# Acceptance tests (red): {ticket}`
+2. `## Tests written` — table with File/Test/Plan case #/Source
+3. `## Red evidence` — the exact command, its exit code, and per test the failure reason (assertion / 404 / missing symbol). Collection, import, syntax or fixture errors are NOT valid red.
+4. `## Lock` — the `kuraka-testlock.py lock` command run and the files locked
+5. `## Confidence: HIGH / MEDIUM / LOW`
+
+**Validation checks:**
+- Every ACCEPTANCE case of the plan has a test (or a stated reason)
+- Every test is red for the right reason on the current baseline
+- The lock file exists and lists every test written
 
 ---
 

@@ -21,6 +21,7 @@ Exit codes:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from collections import defaultdict
@@ -52,6 +53,41 @@ BUDGETS = {
 }
 
 
+# PER-PHASE thresholds ("investigate if exceeds", size M) — authoritative per
+# kuraka-policies.md → Token Budget ("One budget model: PHASE thresholds win").
+# Keep in sync with that table. BUDGETS above stays the fallback for entries
+# whose phase cannot be resolved.
+PHASE_CAPS = {
+    "1": 200_000, "2": 180_000, "2.5": 150_000, "3": 150_000,
+    "4a": 400_000, "4b": 400_000, "5": 200_000, "5.5": 180_000,
+    "6": 300_000, "6.5": 200_000, "6.7": 120_000, "7": 150_000,
+}
+SIZE_FACTOR = {"S": 2 / 3, "M": 1.0, "L": 1.5}
+VARIANT_FACTOR = {"3+probe": 1.3}
+
+
+def _phase_base(label: str) -> str:
+    m = re.match(r"\s*(\d+(?:\.\d+)?[a-z]?)", str(label))
+    return m.group(1) if m else ""
+
+
+def cap_for_run(run: dict, agent: str) -> int | None:
+    """Hard cap for one run: phase table x declared size (S/M/L) x declared
+    variant. A combined label `1+2+2.5` is the sum of its phases (the named
+    variant in kuraka-policies). Falls back to the per-agent cap."""
+    phase = str(run.get("phase", ""))
+    variant = str(run.get("variant") or "")
+    size = str(run.get("size") or "M").strip().upper()[:1]
+    factor = SIZE_FACTOR.get(size, 1.0)
+    label = variant if "+" in variant and variant not in VARIANT_FACTOR else phase
+    bases = [_phase_base(p) for p in label.split("+")]
+    if bases and all(b in PHASE_CAPS for b in bases):
+        cap = sum(PHASE_CAPS[b] for b in bases) * factor
+        cap *= VARIANT_FACTOR.get(variant, 1.0)
+        return int(cap)
+    return BUDGETS.get(agent, (None, None))[1]
+
+
 def find_telemetry_files(project_root: Path) -> list[Path]:
     telemetry_dir = project_root / "docs" / "process" / "agent-telemetry"
     if not telemetry_dir.is_dir():
@@ -81,6 +117,49 @@ def load_checkpoint_phases(project_root: Path) -> dict[str, list[str]]:
     return result
 
 
+def num(value) -> int | None:
+    """Coerce a telemetry number. Non-numeric values ("unknown", "n/a", "") are
+    None — never a crash (guai FD-13: `int("unknown")` killed the aggregator on 3
+    files) and never a silent 0 (null means unmeasured, not free)."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, str):
+        v = value.strip().replace(",", "").replace("_", "")
+        if v.isdigit():
+            return int(v)
+    return None
+
+
+NUMERIC_FIELDS = ("total_tokens", "tool_uses", "duration_ms", "tokens_incremental")
+
+
+def split_phase_label(label: str) -> set[str]:
+    """`1+2+2.5` (combined po-analyst run, the default since Lite v2) covers phases
+    1, 2 and 2.5; `3.9-preflight` covers 3.9. Without this split every combined
+    cycle reported 3 false "no telemetry entry" debts (editorial F-2 9/9,
+    piscosdalston FD-4)."""
+    out: set[str] = set()
+    for part in str(label).split("+"):
+        part = part.strip()
+        if not part:
+            continue
+        out.add(part)
+        out.add(part.split("-")[0])
+        b = _phase_base(part)
+        if b:
+            out.add(b)
+    return out
+
+
+def is_orchestrator_phase_marker(phase: str) -> bool:
+    """A checkpoint entry may declare the phase was run by the orchestrator
+    directly (`6.5-orchestrator`, `6.5@orchestrator`): no Agent call, no entry."""
+    p = str(phase).lower()
+    return "orchestrator" in p or p.endswith("@orch")
+
+
 # Phases the orchestrator runs directly by design — a missing telemetry entry
 # for these is normal (kuraka-policies: only real Agent invocations are logged).
 ORCHESTRATOR_OWNED_PHASES = {"3.9", "6.8"}
@@ -94,13 +173,22 @@ def compute_telemetry_debt(cycle: dict, checkpoint_phases: list[str] | None) -> 
     for run in cycle.get("runs", []):
         agent = str(run.get("agent", "(unknown)"))
         phase = str(run.get("phase", "?"))
-        seen_phases.add(phase)
+        # A 0-token `agent: orchestrator*` entry is how any orchestrator-run phase
+        # (3.9, 6.5, 6.8, ...) declares itself covered.
+        seen_phases.update(split_phase_label(phase))
+        for field in NUMERIC_FIELDS:
+            raw = run.get(field)
+            if raw is not None and num(raw) is None:
+                debts.append(f"phase {phase} · {agent}: non-numeric {field}={raw!r} (record null when unmeasured)")
         if agent.startswith("orchestrator"):
             continue  # orchestrator-side entries legitimately log 0
         status = str(run.get("status", "ok"))
         if status != "ok":
             continue  # session_limit / interrupted / error already self-describe
-        tokens = int(run.get("total_tokens", 0) or 0)
+        if run.get("usage_source") == "unavailable":
+            debts.append(f"phase {phase} · {agent}: usage unavailable (not zero)")
+            continue
+        tokens = num(run.get("total_tokens")) or 0
         if tokens == 0:
             debts.append(f"phase {phase} · {agent}: status ok but 0/missing total_tokens")
             continue
@@ -115,10 +203,13 @@ def compute_telemetry_debt(cycle: dict, checkpoint_phases: list[str] | None) -> 
             )
     if checkpoint_phases:
         for phase in checkpoint_phases:
-            base = phase.split("-")[0]  # "3.9-preflight" -> "3.9"
-            if base in ORCHESTRATOR_OWNED_PHASES:
+            base = _phase_base(phase)  # "3.9-preflight" / "3.9 (note)" -> "3.9"
+            if not base:
+                continue  # user-validation, gates, notes: not an agent phase
+            if base in ORCHESTRATOR_OWNED_PHASES or is_orchestrator_phase_marker(phase):
                 continue
-            if phase not in seen_phases and base not in seen_phases:
+            parts = {_phase_base(p) for p in phase.split("+")} | {base}
+            if not (parts & seen_phases) and phase not in seen_phases:
                 debts.append(f"checkpoint says phase {phase} completed but no telemetry entry exists (orchestrator-direct or missing?)")
     return debts
 
@@ -135,8 +226,19 @@ def effective_tokens(run: dict) -> int:
     is authoritative for aggregation. Otherwise fall back to `total_tokens`.
     """
     if run.get("resumed") and run.get("tokens_incremental") is not None:
-        return int(run.get("tokens_incremental") or 0)
-    return int(run.get("total_tokens", 0) or 0)
+        return num(run.get("tokens_incremental")) or 0
+    return num(run.get("total_tokens")) or 0
+
+
+def has_token_measurement(run: dict) -> bool:
+    key = "tokens_incremental" if run.get("resumed") else "total_tokens"
+    return num(run.get(key)) is not None
+
+
+def measured_total(total: int, known: int, count: int) -> str:
+    if not known:
+        return "n/a"
+    return f"{total:,}" + (" + unknown" if known < count else "")
 
 
 def load_cycle(path: Path) -> dict | None:
@@ -177,10 +279,10 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
         mode = cycle.get("mode", "—")
         runs = cycle.get("runs", [])
         tokens = sum(effective_tokens(r) for r in runs)
-        uses = sum(int(r.get("tool_uses", 0) or 0) for r in runs)
+        uses = sum(num(r.get("tool_uses")) or 0 for r in runs)
         # null/missing durations are legitimate (multi-day combined sessions);
         # render n/a instead of a misleading 0.0s
-        timed = [int(r["duration_ms"]) for r in runs if r.get("duration_ms")]
+        timed = [num(r.get("duration_ms")) for r in runs if num(r.get("duration_ms"))]
         ms = sum(timed)
         if not timed:
             dur = "n/a"
@@ -195,7 +297,9 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
         if cstatus and cstatus not in ("ok",):
             bad.append(cstatus)
         status = "⚠️ " + ", ".join(bad) if bad else "ok"
-        lines.append(f"| {name} | {mode} | {len(runs)} | {tokens:,} | {uses} | {dur} | {status} |")
+        token_label = measured_total(tokens, sum(has_token_measurement(r) for r in runs), len(runs))
+        uses_label = measured_total(uses, sum(num(r.get("tool_uses")) is not None for r in runs), len(runs))
+        lines.append(f"| {name} | {mode} | {len(runs)} | {token_label} | {uses_label} | {dur} | {status} |")
 
     # --- per-agent aggregate ---
     per_agent: dict[str, dict] = defaultdict(lambda: {
@@ -205,6 +309,8 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
         "duration_ms": 0,
         "timed_runs": 0,
         "over_budget": 0,
+        "known_tokens": 0,
+        "known_uses": 0,
     })
 
     # budget_ok integrity: the orchestrator self-reports budget_ok per run, but
@@ -212,7 +318,10 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
     # over-cap run means the check never fired mid-cycle (REQ-20260703: 19/19
     # entries said budget_ok:true while one run exceeded its hard cap and every
     # run exceeded its target).
-    budget_ok_mismatches: list[tuple[str, str, str, int, int]] = []
+    # budget_ok is COMPUTED here (tokens <= hard cap); a hand-typed value is only
+    # compared, never trusted — mismatches in BOTH directions are listed (petsuite
+    # 4 module cycles and guai 0926 had 11 false values typed by hand).
+    budget_ok_mismatches: list[tuple[str, str, str, int, int, str]] = []
 
     for cycle in cycles:
         cycle_name = cycle.get("req_name", "(unknown)")
@@ -220,19 +329,27 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
             agent = run.get("agent", "(unknown)")
             a = per_agent[agent]
             a["invocations"] += 1
+            a["known_tokens"] += has_token_measurement(run)
+            a["known_uses"] += num(run.get("tool_uses")) is not None
             t = effective_tokens(run)
             a["tokens"] += t
-            a["tool_uses"] += int(run.get("tool_uses", 0) or 0)
-            if run.get("duration_ms"):
-                a["duration_ms"] += int(run["duration_ms"])
+            a["tool_uses"] += num(run.get("tool_uses")) or 0
+            if num(run.get("duration_ms")):
+                a["duration_ms"] += num(run.get("duration_ms"))
                 a["timed_runs"] += 1
 
-            _target, hard_cap = BUDGETS.get(agent, (None, None))
+            hard_cap = cap_for_run(run, agent)
             if hard_cap and t > hard_cap:
                 a["over_budget"] += 1
-                if bool(run.get("budget_ok", False)):
+            if hard_cap and has_token_measurement(run) and "budget_ok" in run:
+                computed = t <= hard_cap
+                recorded = run.get("budget_ok")
+                if isinstance(recorded, str):
+                    recorded = recorded.strip().lower() in ("true", "yes", "1")
+                if bool(recorded) != computed:
                     budget_ok_mismatches.append(
-                        (cycle_name, agent, str(run.get("mode", "")), t, hard_cap)
+                        (cycle_name, agent, str(run.get("mode", "")), t, hard_cap,
+                         f"recorded {bool(recorded)} / computed {computed}")
                     )
 
     lines.append("")
@@ -254,8 +371,15 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
             avg_dur = "n/a"
         over = stats["over_budget"]
         flag = f"⚠️ {over}/{n}" if over else f"0/{n}"
+        total_label = measured_total(stats["tokens"], stats["known_tokens"], n)
+        complete = stats["known_tokens"] == n
+        avg_label = f"{avg_t:,.0f}" if complete else "n/a"
+        ratio_label = (f"{per_use:,.0f}" if complete and stats["known_uses"] == n
+                       and stats["tool_uses"] else "n/a")
+        if not complete:
+            flag += " (usage incomplete)"
         lines.append(
-            f"| {agent} | {n} | {stats['tokens']:,} | {avg_t:,.0f} | {per_use:,.0f} | {avg_dur} | {flag} |"
+            f"| {agent} | {n} | {total_label} | {avg_label} | {ratio_label} | {avg_dur} | {flag} |"
         )
 
     lines.append("")
@@ -273,9 +397,9 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
         lines.append("## ⚠️ Agents over budget")
         lines.append("")
         for agent, stats in flagged:
-            _target, hard_cap = BUDGETS.get(agent, (None, None))
             lines.append(
-                f"- **{agent}** — {stats['over_budget']} of {stats['invocations']} invocations exceeded {hard_cap:,} tokens"
+                f"- **{agent}** — {stats['over_budget']} of {stats['invocations']} invocations "
+                f"exceeded their phase threshold (phase x size x variant, kuraka-policies)"
             )
 
     # --- telemetry completeness debt (kuraka-policies → "Completeness is CHECKED") ---
@@ -305,32 +429,66 @@ def render_dashboard(cycles: list[dict], checkpoints: dict[str, list[str]] | Non
         lines.append("## ⚠️ budget_ok integrity mismatches")
         lines.append("")
         lines.append(
-            "Runs recorded `budget_ok: true` whose tokens exceed the agent's hard "
-            "cap — the orchestrator's mid-cycle budget check did not fire. Fix the "
-            "recording discipline (see `kuraka-policies.md` → Token Budget)."
+            "Runs whose recorded `budget_ok` disagrees with the value computed here "
+            "(tokens vs the agent's hard cap). The computed value is authoritative; "
+            "a hand-typed `true` on an over-cap run means the mid-cycle budget check "
+            "did not fire (see `kuraka-policies.md` → Token Budget)."
         )
         lines.append("")
-        lines.append("| Cycle | Agent | Run mode | Tokens | Hard cap |")
-        lines.append("|-------|-------|----------|-------:|---------:|")
-        for cycle_name, agent, run_mode, t, cap in budget_ok_mismatches:
-            lines.append(f"| {cycle_name} | {agent} | {run_mode or '—'} | {t:,} | {cap:,} |")
+        lines.append("| Cycle | Agent | Run mode | Tokens | Hard cap | budget_ok |")
+        lines.append("|-------|-------|----------|-------:|---------:|-----------|")
+        for cycle_name, agent, run_mode, t, cap, verdict in budget_ok_mismatches:
+            lines.append(f"| {cycle_name} | {agent} | {run_mode or '—'} | {t:,} | {cap:,} | {verdict} |")
 
     # --- totals ---
     total_tokens = sum(s["tokens"] for s in per_agent.values())
     total_uses = sum(s["tool_uses"] for s in per_agent.values())
     total_ms = sum(s["duration_ms"] for s in per_agent.values())
+    run_count = sum(s["invocations"] for s in per_agent.values())
+    known_tokens = sum(s["known_tokens"] for s in per_agent.values())
+    known_uses = sum(s["known_uses"] for s in per_agent.values())
+    token_label = measured_total(total_tokens, known_tokens, run_count)
+    uses_label = measured_total(total_uses, known_uses, run_count)
+    duration_label = (f"{total_ms / 60_000:.1f} min" if any(
+        s["timed_runs"] for s in per_agent.values()) else "n/a")
+    average_label = f"{total_tokens / len(cycles):,.0f}" if known_tokens == run_count and run_count else "n/a"
     lines.append("")
     lines.append("## Totals")
     lines.append("")
-    lines.append(f"- Total tokens: **{total_tokens:,}**")
-    lines.append(f"- Total tool uses: **{total_uses}**")
-    lines.append(f"- Total duration: **{total_ms / 60_000:.1f} min**")
-    lines.append(f"- Avg tokens per cycle: **{(total_tokens / len(cycles)):,.0f}**")
+    lines.append(f"- Total tokens: **{token_label}**")
+    lines.append(f"- Total tool uses: **{uses_label}**")
+    lines.append(f"- Total duration: **{duration_label}**")
+    lines.append(f"- Avg tokens per cycle: **{average_label}**")
     lines.append("")
     lines.append("---")
     lines.append("_Budget table lives in `.claude/skills/kuraka-policies.md` and `rules/17`._")
 
     return "\n".join(lines) + "\n"
+
+
+def render_effectiveness(project_root: Path) -> str:
+    """'Efectividad' table from the Phase 6.9 ledgers (ajustes/AJUSTES-*.jsonl).
+    Empty string when there are none (or kuraka_common is not importable)."""
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import kuraka_common as kc
+    except ImportError:
+        return ""
+    d = kc.ajustes_dir(project_root)
+    files = sorted(p for p in d.glob("AJUSTES-*.jsonl") if not p.name.startswith("._")) if d.is_dir() else []
+    if not files:
+        return ""
+    out = ["", "## Efectividad (validación del usuario — fase 6.9)", "",
+           "| Ciclo | Aceptación | Rondas | Ajustes | Faltó preguntar/hacer | Pendientes |",
+           "|---|---|---:|---:|---:|---:|"]
+    first = 0
+    for f in files:
+        s = kc.ajustes_summary(f)
+        first += s["aceptacion"] == "primera-ronda"
+        out.append(f"| {f.stem[len('AJUSTES-'):]} | {s['aceptacion']} | {s['rondas']} | "
+                   f"{s['ajustes_total']} | {s['ajustes_falto']} | {s['pendientes']} |")
+    out += ["", f"- Aceptados en primera ronda: **{first}/{len(files)}**", ""]
+    return "\n".join(out) + "\n"
 
 
 def main() -> int:
@@ -347,6 +505,7 @@ def main() -> int:
         return 1
 
     dashboard = render_dashboard(cycles, load_checkpoint_phases(project_root))
+    dashboard += render_effectiveness(project_root)
     dashboard_path = project_root / "docs" / "process" / "agent-telemetry" / "DASHBOARD.md"
     dashboard_path.write_text(dashboard, encoding="utf-8")
     print(f"[ok] dashboard written to {dashboard_path}")

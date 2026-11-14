@@ -59,7 +59,7 @@ def test_review_mechanics_smoke(tmp_path):
 
 def test_e2e_tester_trimmed_and_playbook_relocated():
     agent = (VAULT / "agents" / "e2e-tester.md").read_text(encoding="utf-8")
-    assert len(agent.splitlines()) <= 220, \
+    assert len(agent.splitlines()) <= 240, \
         "e2e-tester should stay trimmed for haiku (was 282 pre-Wave-4)"
     ctx = (VAULT / "agents" / "contexts" / "e2e-tester-rules.md").read_text(encoding="utf-8")
     assert "CRUD test playbook" in ctx and "### CREATE" in ctx

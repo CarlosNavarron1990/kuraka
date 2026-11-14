@@ -20,11 +20,12 @@ This agent participates in TWO phases:
 - **Skill:** `implement-story`
 - **Receives from:** `architect-reviewer` agent (approved stories + frozen schema)
 - **Delivers to:** `code-reviewer` agent (Phase 5 — code review)
-- **Gate:** All stories implemented, `${stack.backend.lint_cmd}` + `${stack.backend.test_cmd}` pass
+- **Gate:** All stories implemented, `${stack.backend.lint_cmd}` + `${stack.backend.test_cmd}` pass, locked acceptance tests green, `kuraka-testlock.py verify` exit 0
 
-### Phase 6: Tests (see `kuraka`)
+### Phase 6: Tests (see `kuraka`) — only for review-requested micro passes
 - **Skill:** `write-tests`
-- **Receives from:** `code-reviewer` agent (Phase 5 review feedback)
+- **Receives from:** `code-reviewer` agent (Phase 5 review feedback; acceptance
+  tests already exist and are locked — see §Locked acceptance tests)
 - **Delivers to:** `final-auditor` agent (Phase 7 — retrospective)
 - **Gate:** All tests pass, `${stack.backend.lint_cmd}` clean
 
@@ -138,6 +139,9 @@ Follow the test patterns described in the stack profile for
 - **Test naming** — declarative; use the stack's idiomatic form
   (e.g., `test_should_{action}_when_{condition}` for pytest).
 
+- **Expected values from the spec** — cite the plan case / AC / rule each
+  assertion comes from; never copy what the implementation returns.
+
 Run `${stack.backend.test_cmd}` to verify the suite passes after writing.
 
 ## Strict Rules (universal)
@@ -170,6 +174,11 @@ profile and apply automatically when the profile is loaded.
   **refactor first, then implement**.
 - If a test fails and you're not sure why, **investigate before changing
   the test**.
+- If a contract the story needs is MISSING — an endpoint, a response field, a
+  nested object, or a write path that accepts a value but never persists it —
+  **STOP and route a delta** (report it; the orchestrator re-opens the contract).
+  Never invent the field client-side or patch around it (petsuite: debt counted
+  in 3 retros).
 
 ## Scope Fidelity (hard rule)
 
@@ -191,6 +200,41 @@ Implement EXACTLY the endpoints/functions the story names as MODIFY — no more.
    fixture combined with a function-scoped monkeypatch produces order-dependent
    false greens that hide exactly the regression the guard exists to catch.
 
+## Locked acceptance tests (spec first — never edit them)
+
+The acceptance tests of this cycle were written RED before your story, from the
+test plan's oracles (Phase 3.95, or by you first in Lite), and are LOCKED
+(`kuraka-testlock.py`). Your story is done when they are GREEN.
+
+- **Never modify, skip, delete or loosen a locked test** — not its expected
+  value, not its fixture, not by adding an `xfail`/`skip`/`.only`.
+- If one looks wrong (the plan contradicts the frozen contract, or the oracle is
+  impossible), STOP that story and report `conflicto de especificación`: the
+  test, the plan line it comes from, and why. The orchestrator asks the user;
+  only a recorded `unlock` lets it change.
+- New tests you add (internal helpers, the "prove the test" pairs) take their
+  expected value from the plan / AC / business rule and cite it — never from
+  what your code happens to return.
+- Before reporting: `python3 "${KURAKA_VAULT}/kuraka-testlock.py" verify
+  <project-root> --req <REQ>` must exit 0; paste the line.
+
+## Prove the test (red before green)
+
+A new or changed test proves something only if it fails without the change it
+protects. For every test you add for a fix, guard, lock or negative AC:
+
+1. Mutate the protected code (revert the fix, remove the guard, invert the
+   condition) — **safely, per `rules/23-mutaciones-con-registro`**: restore with
+   `git checkout -- <file>` and check `git status --porcelain` afterwards.
+2. Run ONLY that test: it must go **red**, for the expected reason.
+3. Restore, re-run: **green**. Quote both runs (command + exit code) in the report.
+
+Every lock / guard / idempotency check ships with its "mutation → failing test"
+pair in the SAME story. A `gather`, a simulated double-click or a mock of the
+unit under change does not prove the mechanism (editorial F-13/LL-020, guai-home,
+piscosdalston "1 failed / 1 passed"). If the mutation leaves the test green, the
+test has no signal — fix the test, don't report it.
+
 ## End at READY-FOR-EXTERNAL-VERIFY (no terminal self-verification)
 
 Iterate with TARGETED tests while implementing (your new/altered test files,
@@ -211,6 +255,14 @@ told "pure JSONB, no variant" but you ship a temporary variant to keep the
 suite green), you MUST: (1) flag the deviation prominently in your run summary,
 (2) state the rationale, (3) state the planned path back to the instructed
 end-state. Never substitute silently — even when the substitution is better.
+
+**Literal gate evidence in the final report.** Quote the exit code of every gate
+you ran, literally (`MAKE_TEST_EXIT=<n>`, `LINT_EXIT=<n>`), and write
+`GATE NO EJECUTADO` for any gate you did not run (the full gate is the
+orchestrator's — say so). A report that says "tests pass" without the literal
+exit is invalid (sie-integraciones: 4/5 developer runs omitted it). Run hygiene:
+`agents/contexts/subagent-hygiene.md` (own scratchpad, no background job left,
+turn ceiling — `kuraka-policies` §Turn ceiling).
 
 ## Output Validation
 

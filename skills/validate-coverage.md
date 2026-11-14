@@ -59,6 +59,10 @@ For each source file, verify:
 
 ### 5. Quality checklist
 
+- [ ] Every ACCEPTANCE row of the plan has its locked test, green, and
+  `kuraka-testlock.py verify` exits 0.
+- [ ] Every expected value cites its plan case / AC / rule (no expectation
+  mirrored from the implementation).
 - [ ] All tests follow AAA pattern.
 - [ ] Test names follow the stack profile's idiom (e.g.,
   `test_should_{action}_when_{condition}` for pytest).

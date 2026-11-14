@@ -112,6 +112,21 @@ python3 kuraka-archive.py [project_root]                # cycles-only (backward-
 python3 kuraka-restore.py [project_root]                 # central → project (layer + state + overrides)
 python3 kuraka-restore.py [project_root] --overrides-only  # only re-apply overrides (always; used by mount)
 
+# Phase 6.9 — the user's validation of the RUNNING cycle (0 tokens). Every adjustment
+# the user asks for while testing is logged verbatim, classified (falto-preguntar /
+# falto-hacer / bug / ux / cambio-alcance / entorno) with the phase/agent that should
+# have caught it; the cycle closes only with `aceptar` (then Phase 7 runs at once).
+# Ledger: <docs_process_root>/ajustes/AJUSTES-<REQ>.{jsonl,md}; archived with the cycle
+# (meta.yaml aceptacion/ajustes_*) and read by /kuraka-harvest across projects.
+python3 kuraka-ajuste.py add <root> --req REQ --tipo falto-preguntar --debio "1 po-analyst" --texto "..."
+python3 kuraka-ajuste.py ronda|resolver|aceptar|cerrar|estado <root> --req REQ [...]
+
+# Spec-first tests (Phase 3.95): lock the acceptance tests written RED from the
+# plan's oracles; verify fails on any locked test changed without a user unlock.
+python3 kuraka-testlock.py lock <root> --req REQ <test files...>
+python3 kuraka-testlock.py verify|status <root> --req REQ
+python3 kuraka-testlock.py unlock <root> --req REQ --file F --motivo "..." --aprobado-por user
+
 # Structural eval harness (runs from a consumer project that has mounted the artifacts)
 cd <target-project> && python3 -m pytest tests/kuraka/ -v
 # A single test:
@@ -157,7 +172,7 @@ running the current definition and seeing where it creaks. First run (2026-08):
 | `agents/contexts/*.md`    | `.claude/agents/contexts/`        | Per-agent rule bundles and output schemas |
 | `skills/*.md`             | `.claude/skills/<n>/SKILL.md` + flat `.claude/skills/<n>.md` (transition) | Skill prompts (phase-level). Claude Code only registers the DIR form; the flat copy keeps old path references working (retire one suite version after references migrate). Both byte-identical to the vault; `kuraka_common._skill_dir_canonical` maps SKILL.md to the flat baseline for overrides, and restores mirror SKILL.md → flat. Invocability lives in vault frontmatter (`disable-model-invocation`/`user-invocable`/`context: fork`, stripped for non-Claude): phase skills + kuraka core non-invocable (the `/kuraka` COMMAND is the entry point), utilities fork, only facilitate-discovery / diagnose-deploy / seed-project-conventions stay user-invocable. **Collision rule**: a registered skill SHADOWS the same-named slash command, so a skill whose name matches a `commands/*.md` (today only `kuraka`) is mounted ONLY as the flat copy and any stale `<n>/SKILL.md` is deleted — otherwise `/kuraka` resolved to the non-invocable skill ("this skill can only be invoked by Claude") instead of the command entrypoint. |
 | `commands/*.md`           | `.claude/commands/` · `.cursor/commands/` · `.agent/workflows/` · `.codex/prompts/` | Slash-command prompts. Claude: copied verbatim. Non-Claude: rendered by `kuraka-export.py::export_commands` (arg-placeholder + role preamble adapted per tool). `EXPORT_SKIP` = clean-cases/lint/run-tests (sie_v2) + sync-from-vault (Claude-only). |
-| `rules/16-*.md`, `17-*.md`, `18-*.md`, `19-*.md` | `.claude/rules/`           | Framework meta-rules (only these)         |
+| `rules/16-*.md` … `23-*.md` (`kuraka_common.FRAMEWORK_RULES`) | `.claude/rules/` | Framework meta-rules (only these; until 2026-11 the mount copied only 16–19, so 20–23 never reached projects) |
 | `kuraka-artifacts/docs/process/**`    | `docs/process/**`           | lessons-learned + telemetry dashboard template |
 | `kuraka-artifacts/tests/kuraka/**`    | `tests/kuraka/**`           | Structural eval harness                   |
 
@@ -259,12 +274,25 @@ python3 kuraka-apply-models.py           # apply the claude column to frontmatte
 python3 kuraka-apply-models.py --check    # validate map↔files + report drift (exit 1 on drift)
 ```
 
-Current tiers → Claude model: **frontier → `fable`** (the judgment GATES: po-analyst,
-architect-reviewer, code-reviewer, security-reviewer, final-auditor), **heavy → `opus`**
-(architecture/brownfield/pentest/security-audit agents), **balanced → `sonnet`**
-(backend/frontend/story/test), **fast → `haiku`** (mechanical). To re-route an agent,
-change its tier in `MODEL-ROUTING.yaml` and run the script — never edit the frontmatter
-directly (the next `--check` would flag it as drift).
+Current tiers → Claude model (vault frontmatter = the **`max`** plan): **frontier →
+`fable`** (the judgment GATES: po-analyst, architect-reviewer, code-reviewer,
+security-reviewer, final-auditor), **heavy → `opus`** (architecture/brownfield/pentest/
+security-audit agents), **balanced → `sonnet`** (backend/frontend/story/test/pr-writer),
+**fast → `haiku`** (mechanical). To re-route an agent, change its tier in
+`MODEL-ROUTING.yaml` and run the script — never edit the frontmatter directly (the next
+`--check` would flag it as drift).
+
+**Claude account plans (`claude_plans:` in MODEL-ROUTING).** The model column depends on
+the user's subscription and is chosen PER MOUNT, not in the vault:
+`kuraka-mount.py --plan max|pro|team` (or `$KURAKA_CLAUDE_PLAN`, or the plan the project
+was last mounted with, or the TTY question; default `max`). `max` = the frontmatter
+above (byte-identical copy); `pro` ($20) and `team` (standard seat) = Sonnet ceiling +
+Haiku for mechanical work. Non-max plans rewrite only the agent `model:` line, inside
+`kuraka_common.render_for_platform` — the same function the mount manifest hashes — and
+the plan is recorded in the manifest (`claude_plan`, `claude_plan_models`), so
+`detect_overrides` compares against that plan's render and a pro mount never reads as
+project overrides. `kuraka-apply-models.py --check` enforces `claude_plans.max ==
+platforms.claude`.
 
 Two things worth knowing (verified against code.claude.com/docs model-config):
 1. **Tier names are Claude aliases, not pinned IDs** — `opus`/`sonnet`/`haiku`/`fable`
@@ -290,10 +318,24 @@ comparison, so NEVER inject frontmatter at mount time for the claude target.
 Vault-side regression tests for this contract live in `tests-vault/`
 (`python3 -m pytest tests-vault/ -v`; not mounted into consumers).
 
-**Hooks (`hooks/`, Claude-only) + discipline blocks (`discipline/`).** Six
+**Ultra Ahorro (`skills/kuraka-ahorro.md`).** User-selected direct-execution
+mode: zero subagents, no phases, no gates, no independent review. It is enforced
+by the platform, not by prose, and the two platforms enforce it differently —
+Claude with skill frontmatter (`model`/`effort`/`disallowed-tools: Task`, since
+subagent spawns never reach `PreToolUse`) plus an `orchestrator_guard` exception
+scoped to the files declared in `.claude/ultra-ahorro/<cycle>.json` and bound to
+the hook payload's `session_id`; Codex with the helper bundled in
+`skills/kuraka-ahorro/scripts/`, re-expanded from
+`discipline/ultra-ahorro-evidence.md`. Which platform gets the skill (and which
+gets its `scripts/` bundle) is declared in `kuraka_common.SKILL_PLATFORMS` /
+`SKILL_ASSET_PLATFORMS` — the registry the mount and the manifest both read.
+Cursor and Antigravity get neither mechanism, so they do not receive the mode.
+
+**Hooks (`hooks/`, Claude-only) + discipline blocks (`discipline/`).** Seven
 deterministic enforcement hooks (telemetry completeness, gate integrity T7,
 orchestrator write guard, output validation, the RETRO file's verdict line
-`retro_contract.py`, and the SessionStart state health check `session_doctor.py`
+`retro_contract.py`, the SessionStart state health check `session_doctor.py`,
+and `pr_gate.py`, the `validar-pr` pre-PR gate, inert unless a project adopts it
 — see `hooks/README.md`) are mounted
 into `.claude/hooks/` and wired into the consumer's `.claude/settings.json` by a
 non-destructive merge (`merge_claude_hook_settings`), for the claude target ONLY.
@@ -334,7 +376,8 @@ docs live inside `kuraka-artifacts/docs/` (note: `kuraka-artifacts/` is tracked)
 
 Those are sie_v2 team conventions that live in *that* project's git, not here. Only
 `rules/16-agent-backup.md`, `17-kuraka-token-optimizations.md`,
-`18-duplication-aware-refactor.md`, and `19-evidence.md` are framework rules
+`18-duplication-aware-refactor.md`, `19-evidence.md` and `20`–`23` (the list is
+`kuraka_common.FRAMEWORK_RULES`, which the mount reads) are framework rules
 tracked by this repo. If you
 need to edit a rule in the 01–15 range, you are in the wrong repository.
 

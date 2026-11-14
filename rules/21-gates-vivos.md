@@ -29,6 +29,13 @@ Ampliaciones que la version anterior de esta idea NO cubria:
 - Un pipeline de deploy ES un gate: la Phase 6.7 verifica que el workflow
   ejecuta los tests cuyo verde el ciclo reclama (`deploy-backend.yml` corrio
   meses sin uno).
+- **Un detector que enumera formas falla CERRADO.** Un script/grep que reconoce
+  un conjunto de formas (tipos de import, variantes de ruta, shapes de payload)
+  declara su alcance — que formas reconoce — y trata una forma que NO reconoce
+  como hallazgo (exit no-cero, listada), nunca como "limpio". Su salida de
+  calibracion (el caso que matchea y el desconocido que falla) se pega junto al
+  gate (kuraka-control LL-007, S7b F#1: un detector que ignoraba en silencio las
+  formas nuevas dio verde sobre ellas).
 - Complementa la regla 17-T7 (integridad de exit codes): T7 asegura que un
   gate que corre no mienta; esta regla asegura que el gate pueda correr y
   morder.

@@ -26,6 +26,14 @@ per agent invocation.
 | 18-duplication-aware-refactor | `backend-developer`, `frontend-developer`, `code-reviewer` |
 | 19-evidence | ALL agents + the orchestrator's own artifacts |
 
+## Cross-cutting contracts (every pipeline agent)
+
+- `output-schemas.md` — per-agent output contract + self-validation protocol.
+- `subagent-hygiene.md` — run hygiene: per-agent scratchpad, no background job left
+  running, `test -s` on the declared output, no notification-shaped text, no
+  recursion into `kuraka`/agent spawning, read-only git for review/verify agents.
+- `EVIDENCE.md` — incident register behind the evidence rules.
+
 ## Project rule-to-agent mapping (only where the files exist)
 
 > `pentest-auditor` (Qhawaq) is a standalone, on-demand **whole-app** security
@@ -62,4 +70,4 @@ Agents reference their context file in the "Context" section:
 Read: `.claude/agents/contexts/{agent}-rules.md` for the list of rules to read.
 ```
 
-Last updated: 2026-08-22
+Last updated: 2026-11-14

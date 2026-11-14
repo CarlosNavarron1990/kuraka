@@ -538,6 +538,60 @@ Qué porta y qué no:
 Todo se regenera con re-correr el comando; toma el stack/convenciones de
 `kuraka.config.yaml` y los roles/comandos del vault.
 
+### Ultra Ahorro (0 subagentes)
+
+Para **una** tarea local de bajo riesgo, la sesión principal analiza, implementa
+y verifica directamente: cero subagentes, sin fases ni gates, y **sin revisión
+independiente** — revisa el mismo que implementó. Ese es el canje que se acepta
+al elegirlo; no ofrece la cobertura de un ciclo delegado. Lite sigue siendo el
+modo más barato que *sí* da revisión independiente (3 invocaciones).
+
+Elegibilidad: una capa de implementación y sus pruebas, sin schema/migración,
+contrato o endpoint nuevo, auth/permisos, datos sensibles, integración externa,
+despliegue/dependencias/infra ni estado global. Arriba de 5 archivos o 200
+líneas cambiadas se reevalúa el alcance (no se rechaza automáticamente). Una
+función de precios o liquidaciones no es inocua por ser corta.
+
+**Claude Code** — `/kuraka-ahorro <tarea>` o `/kuraka <tarea> --modo ultra-ahorro`:
+
+```text
+/kuraka-ahorro Corrige el espaciado del formulario de clientes
+```
+
+El modo es nativo del harness, no prosa: el frontmatter de la skill fija
+`model: sonnet`, `effort: medium` y `disallowed-tools: Task` — o sea que la
+herramienta de delegación **no está disponible** mientras el modo corre. El
+alcance lo hace cumplir el hook `orchestrator_guard`: la sesión principal solo
+puede escribir bajo las raíces de código los archivos que declaró en
+`.claude/ultra-ahorro/<ciclo>.json`, y el primer write ata el ciclo a esa sesión
+(otra sesión no lo hereda; cerrarlo o abortarlo revoca la excepción al instante).
+`/kuraka` corta camino antes de leer el pipeline: cargarlo es justo el costo que
+el modo evita.
+
+**Codex** — `$kuraka-ahorro <tarea>` o `$kuraka <tarea> --modo ultra-ahorro`. Sin
+hooks ni claves de harness, la disciplina la sostiene el helper empaquetado con
+la skill: guarda línea base, corre los checks y rechaza cierres con cambios fuera
+del alcance, checks fallidos o evidencia anterior a la última edición. El montaje
+Codex incluye además una entrada corta para `$kuraka`. Cursor y Antigravity **no**
+reciben el modo: no tienen ninguno de los dos mecanismos.
+
+Config (`kuraka.config.yaml`, todo opcional — las configs existentes no cambian):
+`workflow.default_mode: ultra-ahorro` lo elige por defecto en todas las
+plataformas, `codex_default_mode: ultra-ahorro` solo en Codex, y el bloque
+`workflow.ultra_ahorro` ajusta umbrales (`max_source_files`, `max_changed_lines`,
+`max_fix_attempts`) o apaga el modo con `enabled: false`. Cero subagentes es
+invariante del modo y no es configurable.
+
+El cierre es **un** RETRO con su `## Confidence:` más telemetría; no hay REQ,
+historias ni plan de pruebas por separado. Los tokens no disponibles se registran
+como `null` y se muestran como `n/a`, nunca como ahorro medido: **todavía no hay
+un porcentaje de ahorro medido** — cero invocaciones es un hecho del diseño, el
+ahorro por ciclo hay que pilotearlo.
+
+Actualizar un proyecto ya montado:
+`python3 kuraka-mount.py /ruta/proyecto --update` (agregar `--target codex` para
+Codex). Después hace falta sesión nueva para que se registre la skill.
+
 ---
 
 ## Store central + backup/restore (historia fuera del git de la solución)

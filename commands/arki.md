@@ -37,10 +37,13 @@ reinicie Claude Code (`/exit` + sesión nueva) y corra `/arki` de nuevo.
 ## Paso 3 — Relevar el Bootstrap Report
 
 Presentá el stack elegido, lo generado y los próximos pasos. No marques el proyecto
-como listo hasta que el usuario apruebe el stack y el scaffolding.
+como listo hasta que el usuario apruebe el stack y el scaffolding. El próximo paso
+recomendado es `/llimpi`, no `/kuraka`.
 
 ## Notas
 
-- Corré esto **una vez**, después de `/inti`. Luego empezá el primer requerimiento
-  con `/kuraka <requerimiento>`.
+- Corré esto **una vez**, después de `/inti`. Luego corré **`/llimpi`** (prototipo,
+  casos de uso y plan de ciclos en `docs/plan/v1/`) y recién después el primer `/kuraka`
+  con el prompt de `C01`. Un proyecto sin interfaz de usuario puede saltar `/llimpi` si el
+  usuario lo decide; entonces empezá con `/kuraka <requerimiento>`.
 - arki no escribe lógica de negocio — solo bootstrap que compila/corre vacío.

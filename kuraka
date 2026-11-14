@@ -56,6 +56,10 @@ usage() {
 
   kuraka mount [dir]       montar Kuraka en dir (default: carpeta actual) — Claude Code
                            (interactivo: menú de categorías + detección de MCP + banner)
+  kuraka mount --plan max|pro|team [dir]
+                           cuenta Claude → modelos de los agentes (max: Fable/Opus;
+                           pro/team: Sonnet/Haiku). Sin flag: $KURAKA_CLAUDE_PLAN,
+                           el plan del último mount, o se pregunta (default max)
   kuraka mount --target codex|cursor|antigravity [dir]
                            generar AGENTS.md + comandos «/» nativos para otros entornos de IA
                            (codex requiere un paso extra para instalar los comandos en ~/.codex)
@@ -76,11 +80,13 @@ sub="${1:-help}"; [ $# -gt 0 ] && shift || true
 
 case "$sub" in
   mount)
-    tgt="claude"; dir=""; tgt_set=0
+    tgt="claude"; dir=""; tgt_set=0; plan_args=()
     while [ $# -gt 0 ]; do
       case "$1" in
         --target)   tgt="${2:-}"; tgt_set=1; shift 2 ;;
         --target=*) tgt="${1#*=}"; tgt_set=1; shift ;;
+        --plan)     plan_args=(--plan "${2:-}"); shift 2 ;;
+        --plan=*)   plan_args=("$1"); shift ;;
         *)          dir="$1"; shift ;;
       esac
     done
@@ -107,7 +113,7 @@ case "$sub" in
     fi
     case "$tgt" in
       claude|codex|cursor|antigravity)
-        "$PY" "$VAULT/kuraka-mount.py" "$target" --target "$tgt" ;;
+        "$PY" "$VAULT/kuraka-mount.py" "$target" --target "$tgt" ${plan_args[@]+"${plan_args[@]}"} ;;
       *)
         echo "❌ target desconocido: $tgt  (claude | codex | cursor | antigravity)" >&2; exit 1 ;;
     esac

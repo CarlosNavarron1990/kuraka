@@ -41,20 +41,34 @@ def test_should_have_valid_frontmatter_when_agent_file_exists(agents_dir: Path, 
     )
 
 
-def test_should_have_fable_for_judgment_agents(agents_dir: Path) -> None:
-    """Agentes de juicio complejo deben usar el tier frontier (Fable)."""
+def _plan_models(agents_dir: Path) -> dict:
+    """tier -> model of the Claude plan this project was mounted with
+    (manifest `claude_plan_models`); legacy mounts = the max column."""
+    import json
+    manifest = agents_dir.parent / ".kuraka-mount-manifest.json"
+    try:
+        models = json.loads(manifest.read_text(encoding="utf-8")).get("claude_plan_models")
+    except (OSError, ValueError):
+        models = None
+    return models or {"frontier": "fable", "heavy": "opus", "balanced": "sonnet", "fast": "haiku"}
+
+
+def test_should_route_judgment_agents_to_frontier_tier(agents_dir: Path) -> None:
+    """Los gates de juicio usan el tier frontier DEL PLAN montado (max: fable; pro/team: sonnet)."""
+    expected = _plan_models(agents_dir)["frontier"]
     judgment_agents = ["architect-reviewer", "security-reviewer", "final-auditor", "po-analyst"]
     for name in judgment_agents:
         fm = parse_frontmatter((agents_dir / f"{name}.md").read_text(encoding="utf-8"))
-        assert fm.get("model") == "fable", f"{name} should use 'fable' for judgment work, got '{fm.get('model')}'"
+        assert fm.get("model") == expected, f"{name} should use '{expected}' (frontier tier of the mounted plan), got '{fm.get('model')}'"
 
 
-def test_should_have_haiku_for_mechanical_agents(agents_dir: Path) -> None:
-    """Agentes de checks mecánicos deben usar Haiku (coste 5× menor)."""
+def test_should_route_mechanical_agents_to_fast_tier(agents_dir: Path) -> None:
+    """Los checks mecánicos usan el tier fast del plan montado (haiku en todos los planes hoy)."""
+    expected = _plan_models(agents_dir)["fast"]
     mechanical_agents = ["deployment-verifier", "pattern-detector", "migration-reviewer", "e2e-tester"]
     for name in mechanical_agents:
         fm = parse_frontmatter((agents_dir / f"{name}.md").read_text(encoding="utf-8"))
-        assert fm.get("model") == "haiku", f"{name} should use 'haiku' for mechanical work, got '{fm.get('model')}'"
+        assert fm.get("model") == expected, f"{name} should use '{expected}' (fast tier of the mounted plan), got '{fm.get('model')}'"
 
 
 # ---------------------------------------------------------------------------

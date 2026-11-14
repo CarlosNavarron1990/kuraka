@@ -58,17 +58,34 @@ List constraints the developer must respect for the code to be testable:
    resources.
 ```
 
-### 3. Plan test cases (pre-implementation)
+### 3. Plan test cases with their ORACLE (pre-implementation)
+
+Every case carries its **oracle**: the concrete input, the concrete expected
+result (return value / HTTP status + body fields / DB state / error), and the
+**source** that fixes that value (AC id, REQ section, frozen-contract line,
+business rule). The expected value comes from the SPEC, never from the code —
+a test whose expectation is read off the implementation confirms whatever the
+code does, bugs included, and mutation testing cannot catch that (it proves
+the test is sensitive, not that the expectation is right).
 
 ```markdown
 ### Test Plan
 
-| # | Story | Function (expected) | Test Case | Type | Category |
-|---|-------|---------------------|-----------|------|----------|
-| 1 | S1 | create_resource() | valid data returns resource | Unit | Happy |
-| 2 | S1 | create_resource() | duplicate raises 409 | Unit | Error |
-| 3 | S1 | create_resource() | missing required field raises 400 | Unit | Edge |
+| # | Story | Function / endpoint | Case | Input | Expected (oracle) | Source | Kind | Category |
+|---|-------|---------------------|------|-------|-------------------|--------|------|----------|
+| 1 | S1 | POST /resources | valid data | `{name:"A", qty:2}` | 201, body `id` set, row `resources(name='A', qty=2)` | AC-1 | ACCEPTANCE | Happy |
+| 2 | S1 | POST /resources | duplicate name | same body twice | 2nd → 409 `code=DUPLICATE`, still 1 row | AC-2, REQ §4 | ACCEPTANCE | Error |
+| 3 | S1 | normalize_name() | trailing spaces | `" A "` | `"A"` | rule R-3 | INTERNAL | Edge |
 ```
+
+- **Kind**: `ACCEPTANCE` = contract / endpoint / AC-level behavior → written
+  RED before any code (Phase 3.95, `test-engineer` TEST_FIRST) and locked.
+  `INTERNAL` = helpers whose interface does not exist yet → written after
+  implementation (Phase 6), still with a sourced expectation + mutation proof.
+- **A case without a sourced expected value is incomplete.** If the spec does
+  not determine the value (which status? rounding? what if empty?), it is an
+  open question for the user (GATE0), never a guess and never "whatever the
+  code returns".
 
 ### 4. Define required fixtures
 
@@ -99,6 +116,27 @@ Flag any story element that may be hard to test:
 | Async concurrency logic | S1 | Hard to test concurrency | Test sequential behavior, mock synchronization |
 ```
 
+### 6. Recorrido table (user-visible changes only)
+
+If the change is visible to the user, the plan includes a `## Recorrido`
+section — the contract the `recorrido-e2e` skill EXECUTES in a real browser
+at Phase 6.8 (the tester runs it, never designs it):
+
+```markdown
+## Recorrido
+
+| # | AC | User action | Expected UI | Expected backend effect (exact endpoint/query) | Evidence |
+|---|----|-------------|-------------|------------------------------------------------|----------|
+| 1 | AC-1 | … | … | `GET /api/…` → field `x == …` / `SELECT … WHERE …` | screenshot + response |
+| n | outcome | … | … | … | … |
+```
+
+One row per acceptance criterion; the LAST row proves the cycle's outcome
+sentence. Every row names the exact endpoint or query and the fields to check;
+a row with no backend effect is marked `UI-ONLY` with its reason (it counts as
+partial evidence). A user-visible change whose plan has no Recorrido table is
+returned by the tester as `RECORRIDO SIN TABLA` — rework you avoid here.
+
 ## Output
 
 Create a test plan file at:
@@ -126,6 +164,9 @@ Create a test plan file at:
 ## Testability Risks
 [from step 5]
 
+## Recorrido
+[from step 6 — only for user-visible changes]
+
 ## Estimated Test Count: N
 - Unit: N
 - Integration: N
@@ -148,6 +189,10 @@ Create a test plan file at:
    cases per function.
 5. **The developer reads this plan** — write it as a contract, not a
    suggestion.
+6. **Every case has an oracle with a source** (step 3). No source → open
+   question, not a test case.
+7. **Mark ACCEPTANCE vs INTERNAL** — acceptance cases become the locked red
+   tests of Phase 3.95; the developer may not edit them.
 6. **Respect Out of Scope** — never include test cases for items the
    story explicitly excluded. See `LL-004` in the project's lessons-learned
    if present.

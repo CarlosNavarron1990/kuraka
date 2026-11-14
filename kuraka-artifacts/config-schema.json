@@ -242,12 +242,47 @@
       "additionalProperties": false,
       "properties": {
         "default_mode": {
-          "description": "Default workflow mode. Current values match kuraka-modes.md. Fase 5 will rebrand normal→compliance and introduce a new 4-phase 'standard' default.",
+          "description": "Default workflow mode. Current values match kuraka-modes.md. 'ultra-ahorro' runs zero subagents and provides no independent review — only select it as a default when the project accepts self-review. Fase 5 will rebrand normal→compliance and introduce a new 4-phase 'standard' default.",
           "type": "string",
-          "enum": ["normal", "reduced", "lite", "retroactive", "compliance", "standard"]
+          "enum": ["normal", "reduced", "lite", "retroactive", "compliance", "standard", "ultra-ahorro"]
+        },
+        "ultra_ahorro": {
+          "description": "Optional Ultra Ahorro tuning; omit to keep the framework defaults. The limits are scope-reevaluation thresholds, not automatic rejections. Zero subagents is an invariant of the mode and is not configurable here.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "max_source_files": { "type": "integer", "minimum": 1 },
+            "max_changed_lines": { "type": "integer", "minimum": 1 },
+            "max_fix_attempts": { "type": "integer", "minimum": 1 },
+            "context_warning_tokens": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "codex_default_mode": {
+          "description": "Optional Codex-only mode override; other platforms keep default_mode. Ultra Ahorro executes directly without subagents for eligible local tasks.",
+          "type": "string",
+          "enum": ["ultra-ahorro", "normal", "reduced", "lite", "retroactive", "compliance", "standard"]
         },
         "gates_require_user_approval": { "type": "boolean" },
-        "parallel_implementation": { "type": "boolean" }
+        "parallel_implementation": { "type": "boolean" },
+        "commit_policy": {
+          "description": "Who performs git mutations during a cycle. 'orchestrator' (default): per-story commit on the feature branch. 'user': the orchestrator never mutates git; a story is DONE when its gate passed, a commit message was proposed and kuraka-backup.py ran.",
+          "type": "string",
+          "enum": ["orchestrator", "user"],
+          "default": "orchestrator"
+        },
+        "base_branch": {
+          "description": "Branch PRs target (pr-writer, validar-pr). Omit to detect from origin/HEAD, else main/master.",
+          "type": "string"
+        },
+        "validar_pr": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enforce_hook": { "type": "boolean", "default": true },
+            "reviewer_cmd": { "type": "string" }
+          }
+        }
       }
     }
   },

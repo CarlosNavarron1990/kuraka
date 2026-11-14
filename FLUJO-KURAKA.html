@@ -1,0 +1,268 @@
+<title>Línea de tiempo Kuraka</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Archivo:wght@600;700&display=swap">
+<style>
+/* Layout: a commit graph down the left (lanes = who runs), one card per event on the right. */
+:root{
+  --bg:#f6f7f5;--surface:#ffffff;--surface-2:#eceeea;--fg:#1b1f1c;--muted:#5d655f;--line:#d5d9d3;
+  --orch:#6a4fb3;--agent:#1d6fa5;--agent2:#1f8a6d;--hook:#8a8f8b;--user:#b5651d;--gate:#b23a3a;--ok:#2e7d3f;
+  --script:#0f6e6e;--script-bg:#dff1ef;--prop:#8a5a00;--prop-bg:#fbefd5;--cond-bg:#f1f0e4;--cond:#6b6420;
+  --font-d:"Archivo","Helvetica Neue",Arial,sans-serif;--font-b:"IBM Plex Sans",-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-m:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#141714;--surface:#1c201d;--surface-2:#262b27;--fg:#e8ece8;--muted:#a3aba5;--line:#353b36;
+  --orch:#a991f0;--agent:#6fb4e6;--agent2:#6fd1b3;--hook:#7d847f;--user:#e7a061;--gate:#ee8a85;--ok:#8fd19c;
+  --script:#7fd6d2;--script-bg:#173332;--prop:#efc173;--prop-bg:#3a2e17;--cond-bg:#2c2b1c;--cond:#d6cc7a;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#141714;--surface:#1c201d;--surface-2:#262b27;--fg:#e8ece8;--muted:#a3aba5;--line:#353b36;
+  --orch:#a991f0;--agent:#6fb4e6;--agent2:#6fd1b3;--hook:#7d847f;--user:#e7a061;--gate:#ee8a85;--ok:#8fd19c;
+  --script:#7fd6d2;--script-bg:#173332;--prop:#efc173;--prop-bg:#3a2e17;--cond-bg:#2c2b1c;--cond:#d6cc7a;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 var(--font-b);margin:0}
+.wrap{max-width:1040px;margin:0 auto;padding-block:28px 72px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font:700 2rem/1.15 var(--font-d);margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
+.lede{color:var(--muted);max-width:68ch;margin:0}
+code{font:.84em var(--font-m);background:var(--surface-2);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);
+  padding-block:10px;margin-top:18px;display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{font:500 .85rem var(--font-b);border:0;background:var(--surface);color:var(--fg);padding:6px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.seg button:focus-visible{outline:2px solid var(--orch);outline-offset:-2px}
+.key{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.8rem;color:var(--muted)}
+.key i{display:inline-block;width:18px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px;background:var(--c)}
+.key i.d{background:repeating-linear-gradient(90deg,var(--c) 0 4px,transparent 4px 7px)}
+h2{font:700 1.05rem var(--font-d);margin:30px 0 4px;letter-spacing:.01em}
+h2 span{display:block;font:400 .85rem var(--font-b);color:var(--muted);letter-spacing:0}
+.tl{display:grid;grid-template-columns:118px minmax(0,1fr)}
+.g{position:relative;min-height:64px}
+.g .ln{position:absolute;width:3px;border-radius:2px;transform:translateX(-1px)}
+.g .ln.dash{background:repeating-linear-gradient(180deg,var(--c) 0 5px,transparent 5px 9px)!important}
+.g .dot{position:absolute;top:19px;width:15px;height:15px;border-radius:50%;transform:translateX(-7px);
+  background:var(--bg);border:3px solid var(--c)}
+.g .dot.fill{background:var(--c)}
+.g .dot.sq{border-radius:3px}
+.g svg{position:absolute;left:0;top:0;width:118px;height:64px;overflow:visible}
+.card{padding:10px 0 14px 4px;min-width:0}
+.card h3{margin:0;font:600 .98rem/1.35 var(--font-b);display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.card h3 .ph{font:500 .78rem var(--font-m);color:var(--muted)}
+.card p{margin:4px 0 0;max-width:72ch}
+.card ul{margin:4px 0 0;padding-left:18px;max-width:72ch}
+.card li{margin:2px 0}
+.tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
+.t{font:500 .72rem var(--font-b);padding:1px 8px;border-radius:999px;white-space:nowrap;border:1px solid var(--line);color:var(--muted)}
+.t.who{border-color:transparent;color:var(--bg);background:var(--c)}
+.t.model{font-family:var(--font-m);color:var(--fg)}
+.t.script{border-color:transparent;background:var(--script-bg);color:var(--script)}
+.t.prop{border-color:transparent;background:var(--prop-bg);color:var(--prop)}
+.t.cond{border-color:transparent;background:var(--cond-bg);color:var(--cond)}
+.t.gate{border-color:transparent;background:var(--gate);color:var(--bg)}
+.t.new{border-color:var(--ok);color:var(--ok)}
+.gatebox{margin-top:6px;font-size:.88rem;border-left:3px solid var(--gate);padding:4px 10px;background:var(--surface);max-width:72ch}
+.loopbox{margin-top:6px;font-size:.88rem;border:1px dashed var(--line);padding:6px 10px;border-radius:6px;max-width:72ch}
+.tablewrap{overflow-x:auto;margin-top:8px}
+table{border-collapse:collapse;width:100%;font-size:.86rem;background:var(--surface);border:1px solid var(--line)}
+th,td{text-align:left;vertical-align:top;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{background:var(--surface-2);font-weight:600;white-space:nowrap}
+td:first-child{white-space:nowrap}
+.note{font-size:.84rem;color:var(--muted);max-width:72ch}
+footer{margin-top:40px;font-size:.8rem;color:var(--muted)}
+@media (max-width:560px){.tl{grid-template-columns:96px minmax(0,1fr)} h1{font-size:1.55rem}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <h1>Línea de tiempo Kuraka</h1>
+  <p class="lede">Lo que se ejecuta desde <code>/kuraka &lt;requerimiento&gt;</code> hasta el <code>kuraka-backup</code> después de la auditoría, en orden. El carril morado es el orquestador; cada rama es un subagente que sale y vuelve; las ramas paralelas son trabajo simultáneo; el carril gris punteado son los hooks y el backup continuo, activos todo el ciclo.</p>
+
+  <div class="bar">
+    <div><span class="note">Plan Claude:</span>
+      <span class="seg" role="group" aria-label="Plan de cuenta Claude">
+        <button type="button" data-plan="max" aria-pressed="true">Max</button>
+        <button type="button" data-plan="pro" aria-pressed="false">Pro $20</button>
+        <button type="button" data-plan="team" aria-pressed="false">Team</button>
+      </span></div>
+    <div class="key">
+      <span style="--c:var(--orch)"><i></i>orquestador</span>
+      <span style="--c:var(--agent)"><i></i>subagente</span>
+      <span style="--c:var(--agent2)"><i></i>subagente en paralelo</span>
+      <span style="--c:var(--user)"><i></i>usuario</span>
+      <span style="--c:var(--hook)"><i class="d"></i>hooks y backup continuo</span>
+      <span><span class="t script">script</span> ya es determinista</span>
+      <span><span class="t prop">a script</span> candidato a script</span>
+    </div>
+  </div>
+
+  <div id="timeline"></div>
+
+  <h2>Qué pasar a script <span>Trabajo repetitivo que hoy hace un modelo y podría hacer un ejecutable montado, a 0 tokens</span></h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Script propuesto</th><th>Reemplaza</th><th>Dónde corre</th><th>Base existente</th></tr></thead>
+    <tbody>
+      <tr><td><code>kuraka-preflight</code></td><td>La fase 3.9 completa: levantar el stack, correr cada gate, armar <code>baseline_red/green</code> y la cabeza de migraciones, y escribirlo en el checkpoint</td><td>3.9</td><td>Hoy lo hace el orquestador comando a comando e interpreta la salida</td></tr>
+      <tr><td><code>kuraka-gate</code></td><td>Correr el gate de una historia, guardar exit y conteos, comparar contra <code>baseline_red</code> y dar un veredicto de una línea. Elimina pipes que esconden el exit y errores de zsh</td><td>4, 6, cada fix-run</td><td><code>gate_integrity</code> solo bloquea; <code>run_mutations.py</code> (editorial)</td></tr>
+      <tr><td><code>kuraka-scope</code></td><td>Chequeo de fidelidad de alcance (T9): diff contra los archivos y funciones que autorizan las historias, y la lista de lo que quedó fuera</td><td>5, 7</td><td><code>scope-fence.sh</code> (guai)</td></tr>
+      <tr><td><code>kuraka-digest</code></td><td>Armar el digest del revisor: esquema congelado, invariantes y hunks del diff por función</td><td>5, 5.5</td><td>Lo arma el orquestador a mano (T8)</td></tr>
+      <tr><td><code>kuraka-names</code></td><td>Verificar que cada nombre que un prompt cita (función, ruta, tabla) exista en el código antes de mandarlo</td><td>antes de cada invocación</td><td><code>check_prompt_names.sh</code> (editorial; PAT-1 en 9 de 9 ciclos)</td></tr>
+      <tr><td><code>kuraka-freeze-index</code></td><td>Validar que el índice nombre → línea del schema freeze sea exacto</td><td>3</td><td><code>check_freeze_index.sh</code> (editorial)</td></tr>
+      <tr><td><code>kuraka-cardinality</code></td><td>Afirmaciones de cantidad ("el único", "N callers") medidas sobre el universo, con control positivo</td><td>3, 5</td><td><code>cardinality-gate.sh</code> (guai)</td></tr>
+      <tr><td><code>kuraka-telemetry add</code></td><td>Agregar la fila de telemetría de cada invocación desde el uso del harness, en vez de escribir el JSON a mano</td><td>tras cada subagente</td><td><code>telemetry_append</code> (hook) lo hace a medias</td></tr>
+      <tr><td><code>kuraka-status</code></td><td>Generar el Workflow Status desde <code>phases_completed</code> del checkpoint</td><td>cada fase</td><td>Regla de 1.2.0; hoy lo escribe el modelo</td></tr>
+      <tr><td><code>kuraka-retro-skeleton</code></td><td>Prellenar el RETRO con telemetría, timeline del checkpoint y tabla de ajustes; el auditor solo escribe el juicio</td><td>7</td><td><code>aggregate-telemetry.py</code>, <code>kuraka-ajuste.py</code></td></tr>
+      <tr><td><code>kuraka-close</code></td><td>Un comando para cerrar: verificar el RETRO, correr <code>kuraka-backup</code> y luego <code>kuraka-doctor</code></td><td>7</td><td><code>check_cycle_closure.py</code> (editorial)</td></tr>
+    </tbody>
+  </table></div>
+  <p class="note">Ya deterministas hoy: <code>kuraka-mount</code>, <code>kuraka-doctor</code>, <code>kuraka-backup</code> (y <code>--state-only</code>), <code>kuraka-ajuste</code>, <code>validar-pr.sh</code> y sus scripts, el spec del recorrido, y los 8 hooks.</p>
+
+  <footer>Fuente: <code>commands/kuraka.md</code>, <code>skills/kuraka.md</code>, <code>kuraka-modes.md</code>, <code>kuraka-policies.md</code>, <code>MODEL-ROUTING.yaml</code> · suite 1.2.0 · 2026-11-14</footer>
+</div>
+
+<script>
+(function(){
+  // Lanes: 0 orquestador · 1 subagente · 2 subagente en paralelo / ronda · 3 hooks y backup continuo
+  var LX=[18,46,74,102], DOTY=26;
+  var COL=["var(--orch)","var(--agent)","var(--agent2)","var(--hook)"];
+  var PLANS={max:{frontier:"fable",heavy:"opus",balanced:"sonnet",fast:"haiku"},
+             pro:{frontier:"sonnet",heavy:"sonnet",balanced:"sonnet",fast:"haiku"},
+             team:{frontier:"sonnet",heavy:"sonnet",balanced:"sonnet",fast:"haiku"}};
+  // lanes: {lane: 'pass'|'start'|'end'}; node: lane of the dot; fork/merge: [from,to]
+  var S=[
+   {sec:"Antes del ciclo",sub:"Una vez por proyecto o al cambiar de rama"},
+   {node:0,lanes:{0:"start",3:"start"},fork:[0,3],kind:"orch",ph:"0.1",title:"<code>kuraka mount --plan max|pro|team</code>",tags:["script"],
+    body:"<ul><li>Respalda los ajustes locales del proyecto al store antes de copiar.</li><li>Copia agentes, skills, comandos, reglas 16–23 y hooks a <code>.claude/</code>. Nunca pisa un archivo que el proyecto versiona; si el proyecto trae su propia skill (p. ej. <code>validar-pr</code>), usa la del proyecto.</li><li>Ajusta el modelo de cada agente al plan de la cuenta y lo guarda en el manifest.</li><li>Ignores en <code>.git/info/exclude</code> (los stashes de GitHub Desktop ya no se llevan Kuraka); hooks en <code>settings.local.json</code> si <code>settings.json</code> está versionado.</li></ul>"},
+   {node:3,lanes:{0:"pass",3:"pass"},kind:"hook",ph:"0.2",title:"Se activan los hooks y el backup continuo",tags:["script"],
+    body:"Desde aquí corren solos durante todo el ciclo: <code>session_doctor</code> al abrir sesión, <code>gate_integrity</code>, <code>orchestrator_guard</code> y <code>pr_gate</code> antes de cada comando, <code>telemetry_append</code> y <code>output_validate</code> al terminar cada subagente, <code>retro_contract</code> al escribir el RETRO, y <code>state_backup</code>, que sube el estado al store como máximo cada 10 minutos aunque el ciclo no cierre."},
+   {sec:"Entrada",sub:"/kuraka <requerimiento>"},
+   {node:0,lanes:{0:"pass",1:"start",3:"pass"},fork:[0,1],kind:"orch",ph:"1.1",title:"¿Ultra Ahorro? Se decide antes de leer nada",
+    body:"Si el modo pedido es <code>ultra-ahorro</code>, la rama sale a la skill <code>kuraka-ahorro</code>: ejecución directa, cero subagentes, sobre los archivos declarados, y termina ahí con un registro de aceptación de una línea."},
+   {node:1,lanes:{0:"pass",1:"end",3:"pass"},kind:"agent",ph:"1.1a",title:"Rama Ultra Ahorro (sale del flujo)",tags:[],fixed:"sonnet · skill",
+    body:"Edita, corre los checks declarados y entrega. No hay fases, gates ni revisión independiente."},
+   {node:0,lanes:{0:"pass",3:"pass"},kind:"orch",ph:"1.2",title:"Carga del orquestador",
+    body:"Lee <code>kuraka.md</code>, <code>kuraka-modes.md</code> y <code>kuraka-policies.md</code>; aplica <code>rules/17</code> antes de cualquier subagente."},
+   {node:0,lanes:{0:"pass",3:"pass"},kind:"gate",ph:"1.3",title:"Preflight <code>kuraka-doctor</code>",tags:["script","gate"],
+    body:"Verifica el estado, no códigos de salida: config, capa, manifest, ajustes vs store, RETROs archivados, telemetría, ciclos abiertos sin RETRO, estado atrapado en stashes, gates de relleno.",gate:"Exit 0 para empezar. Si no: <code>--fix</code> y actuar sobre lo que quede."},
+   {sec:"Pre-flujo",sub:"Sin subagentes: lo decide el orquestador con el usuario"},
+   {node:0,lanes:{0:"pass",3:"pass"},kind:"orch",ph:"2.1",title:"Análisis de superficie",tags:["prop"],
+    body:"Archivos y LOC estimados y cuáles de los 5 disparadores aparecen: schema/migración, endpoint o contrato, auth/PII, integración, flujo de 2 o más pantallas."},
+   {node:0,lanes:{0:"pass",3:"pass"},kind:"user",ph:"2.2",title:"Menú de modos",
+    body:"2–3 modos viables con invocaciones y presupuesto (~150K por invocación). 0 disparadores → Lite, 1 → Reducido, 2 o más → Normal. Si el usuario ya eligió, no se pregunta."},
+   {node:0,lanes:{0:"pass",3:"pass"},kind:"user",ph:"2.3",title:"Esbozo de solución y una sola autorización",
+    body:"Frase de resultado (la misma que se verifica en 6.8 y 6.9), pasos con rutas reales NEW/MODIFY, lo que queda fuera y preguntas abiertas."},
+   {sec:"Análisis",sub:"Fases 1, 2 y 2.5 en una sola invocación"},
+   {node:1,lanes:{0:"pass",1:"start",3:"pass"},fork:[0,1],kind:"agent",ph:"F1+2+2.5",title:"<code>po-analyst</code> en modo COMBINED",tier:"frontier",
+    body:"<ul><li>GATE0: <code>requirement-consistency-check</code> primero; cada BLOCKER es una pregunta al usuario.</li><li>Entrega REQ, historias y plan de pruebas. Si el cambio es visible, el plan trae la tabla <b>Recorrido</b>: una fila por criterio de aceptación con la acción, la pantalla esperada y el endpoint o query a verificar.</li></ul>"},
+   {node:0,lanes:{0:"pass",1:"end",3:"pass"},merge:[1,0],kind:"gate",ph:"G1",title:"Gate del análisis",tags:["gate"],
+    gate:"REQ dentro del alcance autorizado, sin BLOCKER pendiente, y el JSON de telemetría del REQ creado (GATE1)."},
+   {sec:"Arquitectura y entorno",sub:"Fases 3 y 3.9"},
+   {node:1,lanes:{0:"pass",1:"start",3:"pass"},fork:[0,1],kind:"agent",ph:"F3",title:"<code>architect-reviewer</code>: revisión y schema freeze",tier:"frontier",tags:["cond"],cond:"schema, endpoint o contrato",
+    body:"Congela el esquema en <code>SCHEMA-FROZEN-{ticket}.md</code>. Revisa enums declarados, modelo de identidad, reusar antes de crear y códigos HTTP del mapa de excepciones."},
+   {node:0,lanes:{0:"pass",1:"end",3:"pass"},merge:[1,0],kind:"orch",ph:"F3.9",title:"Pre-flight del entorno",tags:["script","prop"],
+    body:"Lee las convenciones del proyecto para el orquestador, levanta el stack vigente, corre cada comando de gate una vez y guarda en el checkpoint <code>baseline_red</code>, <code>baseline_green</code> y la cabeza de migraciones, medidos en este ciclo.",gate:"Baseline en el checkpoint y el gate demostrado capaz de fallar."},
+   {node:1,lanes:{0:"pass",1:"start",3:"pass"},fork:[0,1],kind:"agent",ph:"F3.95",title:"<code>test-engineer</code> TEST_FIRST: tests de aceptación en rojo",tier:"balanced",tags:["new","script"],
+    body:"Escribe los tests de aceptación desde el plan (cada caso con su valor esperado y la fuente que lo fija) y el contrato congelado, <b>sin leer el código que va a cambiar</b>. Los corre y demuestra que fallan por la razón correcta (assert, 404), no por errores de import o fixture."},
+   {node:0,lanes:{0:"pass",1:"end",3:"pass"},merge:[1,0],kind:"gate",ph:"G3.95",title:"Rojo verificado y tests bloqueados",tags:["gate","script"],
+    gate:"<code>kuraka-testlock.py lock</code> guarda el hash de cada test de aceptación. Desde aquí el valor esperado sale de la especificación, nunca de la implementación."},
+   {sec:"Implementación",sub:"Fase 4, historia por historia"},
+   {node:1,lanes:{0:"pass",1:"start",3:"pass"},fork:[0,1],kind:"agent",ph:"F4a",title:"<code>backend-developer</code>",tier:"balanced",
+    body:"Implementa la historia con <code>implement-story</code> hasta poner en verde los tests bloqueados, sin editarlos. Si cree que uno está mal, reporta un <b>conflicto de especificación</b> y decide el usuario. Reporta el exit literal del gate."},
+   {node:2,lanes:{0:"pass",1:"pass",2:"start",3:"pass"},fork:[0,2],kind:"agent2",ph:"F4b",title:"<code>frontend-developer</code> en paralelo",tier:"balanced",tags:["cond"],cond:"historias independientes y workflow.parallel_implementation",
+    body:"Rama paralela solo cuando las historias no dependen entre sí. Las historias de backend que tocan proveedores, seeds o migraciones van en secuencia (<code>rules/17</code>)."},
+   {node:0,lanes:{0:"pass",1:"end",2:"end",3:"pass"},merge:[1,0],merge2:[2,0],kind:"gate",ph:"G4",title:"Gate por historia y asegurar el diff",tags:["gate","prop"],
+    body:"Antes de cada gate el orquestador re-sondea el entorno y la cabeza de migraciones. Verde = sin regresión contra <code>baseline_red</code> más tests nuevos en verde, medido en HEAD.",
+    gate:"Lint, typecheck y tests en verde, tests bloqueados en verde y <code>kuraka-testlock.py verify</code> en 0 (ninguno modificado sin <code>unlock</code> aprobado). Según <code>commit_policy</code>: commit por historia, o mensaje propuesto más backup si el equipo hace sus commits."},
+   {sec:"Revisión",sub:"Fases 5 y 5.5"},
+   {node:1,lanes:{0:"pass",1:"start",3:"pass"},fork:[0,1],kind:"agent",ph:"F5",title:"<code>code-reviewer</code>",tier:"frontier",tags:["prop"],
+    body:"Recibe el digest (esquema, invariantes, hunks del diff). Un BLOCKER nombra el invariante que rompe y prueba que no es preexistente; revisa el historial de un hallazgo antes de diferirlo."},
+   {node:2,lanes:{0:"pass",1:"pass",2:"start",3:"pass"},fork:[0,2],kind:"agent2",ph:"F5 sub",title:"<code>migration-reviewer</code> en paralelo",tier:"fast",tags:["cond"],cond:"hay migraciones",
+    body:"Revisa solo las migraciones DDL del ciclo."},
+   {node:0,lanes:{0:"pass",1:"end",2:"end",3:"pass"},merge:[1,0],merge2:[2,0],kind:"gate",ph:"G5",title:"Gate de revisión",tags:["gate","prop"],
+    gate:"Sin BLOCKER ni IMPORTANT, y fidelidad de alcance: las funciones cambiadas son las autorizadas, verificado con un diff del propio orquestador."},
+   {node:1,lanes:{0:"pass",1:"start",3:"pass"},fork:[0,1],kind:"agent",ph:"F5.5",title:"<code>security-reviewer</code>",tier:"frontier",tags:["cond"],cond:"auth, PII, tokens, cripto o proveedor",
+    body:"OWASP, secretos, aislamiento de tenant, auth por endpoint. Seguridad por construcción demostrada por clase de amenaza.",gate:"Sin CRITICAL; un HIGH lo acepta el usuario."},
+   {sec:"Verificación",sub:"Fases 6 a 6.8"},
+   {node:1,lanes:{0:"pass",1:"pass",3:"pass"},kind:"agent",ph:"F6",title:"<code>test-engineer</code>: huecos de cobertura",tier:"balanced",tags:["cond"],cond:"quedan huecos de cobertura",
+    body:"Solo tests INTERNAL y huecos que deja la 3.95, cada uno probado por mutación. El código dice qué falta probar, nunca qué esperar: cada valor esperado cita su fuente, y si el código contradice el plan es un hallazgo, no un test que se ajusta."},
+   {node:1,lanes:{0:"pass",1:"pass",3:"pass"},kind:"agent",ph:"F6.5",title:"<code>e2e-tester</code>",tier:"fast",tags:["cond"],cond:"flujo visible de 2+ pantallas",
+    body:"Si ya corrió el recorrido, lo promueve a la suite de regresión en vez de escribir otro spec."},
+   {node:1,lanes:{0:"pass",1:"pass",3:"pass"},kind:"agent",ph:"F6.7",title:"<code>deployment-verifier</code>",tier:"fast",tags:["cond"],cond:"config, env, migraciones o infra",
+    body:"docker-compose, variables, nginx, CI y migraciones. Toda afirmación sobre staging o prod lleva su comando o <code>NOT VERIFIED</code>."},
+   {node:1,lanes:{0:"pass",1:"end",3:"pass"},kind:"agent",ph:"F6.8",title:"Recorrido con navegador real (<code>recorrido-e2e</code>)",tier:"fast",tags:["script"],
+    body:"Para todo cambio visible: un spec Playwright generado desde la tabla Recorrido actúa en el navegador sobre el stack aislado de <code>validar-pr</code>, verifica pantalla y backend en cada paso y guarda trace, capturas y video en <code>RECORRIDO-{REQ}.md</code>. Sin cambio visible, un smoke end-to-end documentado."},
+   {node:0,lanes:{0:"pass",3:"pass"},merge:[1,0],kind:"gate",ph:"G6.8",title:"Gate del smoke",tags:["gate"],
+    gate:"Recorrido o smoke en verde (por el agente o ejecutado por el usuario). Un FAIL abre una historia de fix y se re-corre el mismo spec. En auth/sesión/seguridad no hay skip: si no se ejecuta, el ciclo cierra como <code>PENDING-SMOKE</code>."},
+   {sec:"Validación del usuario",sub:"Fase 6.9: efectividad y ajustes del ciclo"},
+   {node:0,lanes:{0:"pass",2:"start",3:"pass"},fork:[0,2],kind:"user",ph:"F6.9",title:"El usuario prueba",tags:["new","script"],
+    body:"El orquestador presenta la frase de resultado y la evidencia del recorrido. El usuario prueba como lo usaría de verdad."},
+   {node:2,lanes:{0:"pass",2:"pass",3:"pass"},kind:"agent2",ph:"ronda",title:"Ronda de ajustes",tags:["script"],
+    body:"Cada ajuste se registra textual contra el ciclo en curso con <code>kuraka-ajuste.py add</code>, clasificado: bug, UX, cambio de alcance, <b>faltó preguntar</b>, <b>faltó hacer</b> o entorno, y qué fase debió detectarlo.",
+    loop:"Ajuste → delta de fase 4 → mismo recorrido otra vez → nueva ronda. Se repite hasta que el usuario acepta."},
+   {node:0,lanes:{0:"pass",2:"end",3:"pass"},merge:[2,0],kind:"gate",ph:"G6.9",title:"Aceptación del usuario",tags:["gate","script"],
+    gate:"<code>kuraka-ajuste.py aceptar</code> registra la aceptación y cuántas rondas hicieron falta. Con eso la fase 7 corre de inmediato, en la misma sesión."},
+   {sec:"Auditoría y cierre",sub:"Fase 7"},
+   {node:1,lanes:{0:"pass",1:"start",3:"pass"},fork:[0,1],kind:"agent",ph:"F7.1",title:"<code>final-auditor</code>: RETRO",tier:"frontier",tags:["prop"],
+    body:"<ul><li>Resumen, retrabajo, hallazgos por agente, telemetría y la línea <code>## Confidence:</code>.</li><li><b>Efectividad</b>: aceptado en primera ronda o no, rondas, ajustes. Cada <i>faltó preguntar</i> o <i>faltó hacer</i> se convierte en un parche concreto para la capa del proyecto.</li><li>Revisa que cada fase haya usado su agente especializado.</li></ul>"},
+   {node:0,lanes:{0:"pass",1:"end",3:"pass"},merge:[1,0],kind:"orch",ph:"F7.2",title:"Aplicar los parches a la capa del proyecto",
+    body:"Van a <code>.claude/project/</code>: appends de agentes, lessons-learned, review-checks. Es lo que después recoge <code>/kuraka-harvest</code> en el vault."},
+   {node:0,lanes:{0:"pass",3:"end"},merge:[3,0],kind:"gate",ph:"F7.3",title:"<code>kuraka-backup</code>: último paso",tags:["script","gate"],
+    body:"Sube al store la capa, <code>docs/process</code>, el ciclo (RETRO, telemetría, ajustes, <code>meta.yaml</code> con versión de suite y aceptación), los overrides y los instrumentos propios del proyecto.",
+    gate:"Exit 0. Sale 1 si el RETRO no tiene <code>## Confidence:</code>: el estado se respalda igual, pero el ciclo no cierra."},
+   {node:0,lanes:{0:"end"},kind:"ok",ph:"F7.4",title:"<code>kuraka-doctor</code> confirma y el ciclo cierra",tags:["script"],
+    body:"Re-lee el store: RETRO archivado, telemetría adjunta, ajustes respaldados. Cierra con RETRO + backup exit 0 + doctor en verde."},
+   {sec:"Después",sub:"PR y mejora del framework"},
+   {node:0,lanes:{0:"start"},kind:"orch",ph:"PR",title:"<code>validar-pr</code> y <code>pr-writer</code>",tags:["script"],tier2:"balanced",
+    body:"<code>validar-pr.sh</code> fusiona sobre la base en un clon aislado, corre lint, secretos y la suite de lo que toca la PR, y una revisión ciega. El hook <code>pr_gate</code> bloquea <code>gh pr create</code> sin informe APROBABLE. <code>pr-writer</code> redacta la descripción."},
+   {node:0,lanes:{0:"end"},kind:"ok",ph:"Vault",title:"<code>/kuraka-harvest</code>",
+    body:"Junta appends, lessons, RETROs, ajustes y overrides de todos los proyectos; los <i>faltó preguntar / faltó hacer</i> agrupados por fase dicen qué agente necesita una pregunta o un chequeo nuevo. Sube la versión de la suite y el próximo <code>kuraka mount --update</code> la entrega."}
+  ];
+  var KC={orch:"var(--orch)",agent:"var(--agent)",agent2:"var(--agent2)",hook:"var(--hook)",user:"var(--user)",gate:"var(--gate)",ok:"var(--ok)"};
+  var TAG={script:'<span class="t script">script</span>',prop:'<span class="t prop">a script</span>',gate:'<span class="t gate">gate</span>',new:'<span class="t new">nuevo en 1.2.0</span>'};
+  var root=document.getElementById("timeline"), html="";
+  function curve(a,b,y0,y1,c,dash){return '<path d="M'+LX[a]+' '+y0+' C '+LX[a]+' '+(y0+y1)/2+', '+LX[b]+' '+(y0+y1)/2+', '+LX[b]+' '+y1+'" fill="none" stroke="'+c+'" stroke-width="3"'+(dash?' stroke-dasharray="5 4"':'')+'/>';}
+  S.forEach(function(s){
+    if(s.sec){html+='<h2>'+s.sec+'<span>'+s.sub+'</span></h2>';return;}
+    var g='<div class="g" aria-hidden="true">', svg='';
+    Object.keys(s.lanes).forEach(function(k){
+      var l=+k, st=s.lanes[k], top=0, bot=0, style='';
+      var forked=(s.fork&&s.fork[1]===l)||(s.fork2&&s.fork2[1]===l);
+      if(st==="start"){top=forked?60:DOTY;}
+      if(st==="end"){bot=null;}
+      var c=COL[l];
+      if(st==="end"){style='top:0;height:'+((s.merge&&s.merge[0]===l)||(s.merge2&&s.merge2[0]===l)?6:DOTY)+'px';}
+      else style='top:'+top+'px;bottom:0';
+      g+='<div class="ln'+(l===3?' dash':'')+'" style="left:'+LX[l]+'px;'+style+';background:'+c+';--c:'+c+'"></div>';
+    });
+    if(s.fork) svg+=curve(s.fork[0],s.fork[1],DOTY,60,COL[s.fork[1]],s.fork[1]===3);
+    if(s.merge) svg+=curve(s.merge[0],s.merge[1],6,DOTY,COL[s.merge[0]],s.merge[0]===3);
+    if(s.merge2) svg+=curve(s.merge2[0],s.merge2[1],6,DOTY,COL[s.merge2[0]],false);
+    if(svg) g+='<svg viewBox="0 0 118 64">'+svg+'</svg>';
+    var c=KC[s.kind]||COL[s.node];
+    var shape=(s.kind==="gate")?' sq':'';
+    g+='<div class="dot'+((s.kind==="ok"||s.kind==="gate")?' fill':'')+shape+'" style="left:'+LX[s.node]+'px;--c:'+c+'"></div></div>';
+    var who={orch:"orquestador",agent:"subagente",agent2:"subagente en paralelo",hook:"hooks",user:"usuario",gate:"orquestador",ok:"cierre"}[s.kind];
+    var tags='<span class="t who" style="--c:'+c+'">'+who+'</span>';
+    if(s.tier) tags+='<span class="t model" data-tier="'+s.tier+'"></span>';
+    if(s.fixed) tags+='<span class="t model">'+s.fixed+'</span>';
+    (s.tags||[]).forEach(function(t){ if(t==="cond") tags+='<span class="t cond">si '+s.cond+'</span>'; else tags+=TAG[t]||""; });
+    var card='<div class="card"><h3><span class="ph">'+s.ph+'</span> '+s.title+'</h3><div class="tags">'+tags+'</div>';
+    if(s.body) card+=(s.body.indexOf("<ul>")===0?s.body:'<p>'+s.body+'</p>');
+    if(s.loop) card+='<div class="loopbox">↺ '+s.loop+'</div>';
+    if(s.gate) card+='<div class="gatebox"><b>Gate:</b> '+s.gate+'</div>';
+    card+='</div>';
+    html+='<div class="tl">'+g+card+'</div>';
+  });
+  root.innerHTML=html;
+  function apply(plan){
+    var m=PLANS[plan]||PLANS.max;
+    document.querySelectorAll("[data-tier]").forEach(function(el){var t=el.getAttribute("data-tier");el.textContent=m[t]+" · "+t;});
+    document.querySelectorAll(".seg button").forEach(function(b){b.setAttribute("aria-pressed",String(b.getAttribute("data-plan")===plan));});
+    try{localStorage.setItem("kuraka-plan",plan);}catch(e){}
+  }
+  document.querySelectorAll(".seg button").forEach(function(b){b.addEventListener("click",function(){apply(b.getAttribute("data-plan"));});});
+  var saved="max";try{saved=localStorage.getItem("kuraka-plan")||"max";}catch(e){}
+  apply(saved);
+})();
+</script>

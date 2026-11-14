@@ -174,7 +174,19 @@ canonical paths — never one merged document, because the downstream consumers
    convention validation (step 4) and staleness check (step 5) are NOT
    optional in COMBINED.
 3. `${architecture.paths.docs_process_root}/test-plans/TEST-PLAN-{ticket}.md`
-   — following the `plan-tests` skill output shape.
+   — following the `plan-tests` skill output shape. **Every case carries its
+   oracle**: concrete input → concrete expected result (status + fields / DB
+   state / error) + the SOURCE that fixes it (AC id, REQ section, frozen-contract
+   line, business rule), and is marked `ACCEPTANCE` (written RED before code in
+   Phase 3.95 and locked) or `INTERNAL` (after implementation). A value the spec
+   does not determine is an open question for the user (GATE0) — never guessed,
+   never left for "whatever the code returns". In `LITE_COMBINED` the oracle
+   rows go inside the `REQ-LITE-*.md` (the L2 developer writes them red first).
+   For a user-visible change it MUST include the `## Recorrido` table
+   (`plan-tests` step 6): one row per AC + a last row proving the outcome
+   sentence, each with the exact endpoint/query to re-check — Phase 6.8 runs it
+   in a real browser (`recorrido-e2e`) and the tester only executes it. In
+   `LITE_COMBINED` the same table goes inside the `REQ-LITE-*.md`.
 
 **Order matters**: complete the REQ's scope and table inventory BEFORE
 decomposing into stories, and the stories BEFORE the test plan — the test plan

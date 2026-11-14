@@ -22,22 +22,61 @@ from pathlib import Path
 
 
 def _has_pipe_after(cmd: str, start: int) -> bool:
+    """True if the gate's OWN pipeline segment (from `start` to the next command
+    separator `;` `&&` `||` `&` or newline) contains a pipe `|`. Quote-aware: a
+    `|` inside '...' or "..." (e.g. `grep 'a|b'`) is data, not a pipe. A pipe in
+    a LATER statement (`make test > f; grep x f | tail`) does not touch the gate's
+    exit code and is not flagged (guai FD-8, editorial F-1, kuraka-control FP-1)."""
     i = start
-    while i < len(cmd):
+    quote = ""
+    n = len(cmd)
+    while i < n:
         c = cmd[i]
-        if c == "|":
-            if i + 1 < len(cmd) and cmd[i + 1] == "|":  # logical OR, not a pipe
+        if quote:
+            if c == "\\" and quote == '"':
                 i += 2
                 continue
-            if i > 0 and cmd[i - 1] == "|":
+            if c == quote:
+                quote = ""
+            i += 1
+            continue
+        if c == "\\":
+            i += 2
+            continue
+        if c in ("'", '"'):
+            quote = c
+            i += 1
+            continue
+        if c in (";", "\n"):
+            return False
+        if c == "&":
+            if i > 0 and cmd[i - 1] in (">", "<"):  # 2>&1, >&2 redirects
                 i += 1
                 continue
+            if i + 1 < n and cmd[i + 1] == ">":  # &> redirect
+                i += 2
+                continue
+            return False  # && or background & ends the gate's segment
+        if c == "|":
+            if i + 1 < n and cmd[i + 1] == "|":  # logical OR ends the segment
+                return False
             if i > 0 and cmd[i - 1] == ">":  # >| clobber redirect
                 i += 1
                 continue
             return True
         i += 1
     return False
+
+
+_PLACEHOLDER = re.compile(r"^(?:|todo|tbd|fixme|xxx|n/?a|none|null|-+|<.*>)$", re.I)
+
+
+def is_placeholder_gate(value: str) -> bool:
+    """A configured gate that is empty or a placeholder (TODO/TBD/FIXME/<...>) is
+    NOT a gate: matching it would block unrelated commands, and the doctor must
+    flag it as unset (azure FD-5/FD-17)."""
+    v = (value or "").strip().strip("\"'").strip()
+    return bool(_PLACEHOLDER.match(v)) or len(v) <= 2
 
 
 def main() -> int:
@@ -62,7 +101,7 @@ def main() -> int:
     for m in re.finditer(r"^\s*(?:test_cmd|lint_cmd|typecheck_cmd):\s*\"?([^\"\n#]+?)\"?\s*$",
                          cfg, re.M):
         g = m.group(1).strip()
-        if len(g) > 2:
+        if not is_placeholder_gate(g):
             gates.append(g)
 
     for g in gates:

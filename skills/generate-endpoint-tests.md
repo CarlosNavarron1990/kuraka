@@ -14,8 +14,12 @@ test client, for the project described in `kuraka.config.yaml`.
 
 ## Input
 
-- Endpoint file to test (under `${architecture.paths.backend_root}`).
-- Test plan from `analyze-testability`.
+- Endpoint contract: the frozen schema / story API contract (TEST_FIRST, 3.95 —
+  the endpoint may not exist yet; the test is then RED with 404/405) or the
+  endpoint file (Phase 6 gaps, under `${architecture.paths.backend_root}`).
+- Test plan cases with their oracles (status, body fields, DB state + source).
+- **Expected status/body come from the contract and the plan, never from the
+  handler's current output — cite the source.**
 
 ## Key Principle
 

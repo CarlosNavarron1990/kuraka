@@ -50,6 +50,10 @@ Read:
 - Previous retros in
   `${architecture.paths.docs_process_root}/agent-retrospectives/`.
 - The conversation history for user corrections.
+- The Phase 6.9 user-validation ledger: `python3 "${KURAKA_VAULT}/kuraka-ajuste.py"
+  estado <project-root> --req <REQ> --json` (`ajustes/AJUSTES-<REQ>.md`). It is the
+  verbatim record of what the user had to ask to adjust — the RETRO's
+  `## Efectividad` section is built from it, never from memory.
 
 ### 2. Count iteration loops
 
@@ -104,7 +108,46 @@ For each agent / file that needs updating, specify:
 Create at
 `${architecture.paths.docs_process_root}/agent-retrospectives/RETRO-{REQ-name}.md`.
 
-Also copy to `RETRO-LATEST.md` for easy access.
+Also point `RETRO-LATEST.md` at it — as a symlink, re-created with `ln -sfn RETRO-{REQ}.md RETRO-LATEST.md`.
+NEVER `cp`/write onto an existing `RETRO-LATEST.md`: if it is a symlink, the write goes THROUGH it and
+clobbers the previous cycle's retro (guai-home: a 166 B stub overwrote a 31 KB RETRO, 2 incidents).
+Where symlinks are unavailable, `rm -f RETRO-LATEST.md` first, then copy.
+
+**Mandatory section — `## Efectividad (validación del usuario)`:**
+
+<!-- Built from `python3 "${KURAKA_VAULT}/kuraka-ajuste.py" estado <root> --req <REQ> --json`
+     (Phase 6.9 ledger, `ajustes/AJUSTES-<REQ>.md`). Never re-derived from memory. -->
+- Aceptación: `<primera-ronda | tras-N-rondas | sin-aceptacion | sin-registro>` · rondas: N · ajustes: N · faltó preguntar/hacer: N · pendientes: N
+
+| # | Tipo | Debió detectarlo | Pedido del usuario (textual) | Patch aplicado (capa del proyecto) |
+|---|------|------------------|------------------------------|------------------------------------|
+
+For EVERY `falto-preguntar` / `falto-hacer` row: a concrete patch to the project
+layer — the `.append.md` of the agent named in "debió" (a question it must ask,
+a check it must run), a `lessons-learned/` entry, or a `review-checks/` line —
+applied in this phase and tagged `harvest-candidate` so `/kuraka-harvest` can
+lift it into the vault. `bug` / `ux` rows: say which gate or recorrido step
+should have failed and didn't. `sin-registro` (no ledger) is itself a finding:
+the cycle closed without the user's validation being recorded.
+
+**Contract of the RETRO FILE — the last line is mandatory:**
+
+```markdown
+## Confidence: HIGH | MEDIUM | LOW
+```
+
+It is not decoration and not the same thing as the confidence line of your
+*response*: `kuraka-backup.py` parses it out of the FILE (`find_verdict`) into
+`cycles/<REQ>/meta.yaml` and into the cross-project `projects/INDEX.md`, which is
+what `pattern-detector` reads to compare cycles across projects. A RETRO without
+it is archived but nearly invisible: it becomes a row with an empty verdict.
+
+State it explicitly here — do NOT rely on the platform reminding you. On Claude
+the `output_validate.py` hook (SubagentStop) enforces the line on your response,
+so it tends to end up in the file too; the platforms without hooks only have the
+manual prose, and in practice that produced whole projects of verdict-less
+retros (camisassis: 16 of 16 archived with `verdict: ""`, so none of its cycles
+count in any cross-project comparison).
 
 ### 8. Ask user and apply patches
 
@@ -112,6 +155,11 @@ Also copy to `RETRO-LATEST.md` for easy access.
 changes and agent prompt tuning can be applied immediately to the mounted agent files (`.agents/` in Antigravity, `.claude/` in Claude Code, `.cursor/` in Cursor, `.codex/` in Codex); framework changes require
 contributing back to the framework repo."
 When approved by the user, apply project-layer and agent prompt patches directly to the corresponding mounted files.
+The `falto-preguntar` / `falto-hacer` patches from `## Efectividad` go to the
+PROJECT LAYER (`.claude/project/agents/<agent>.append.md`, `lessons-learned/`,
+`review-checks/`) with a `harvest-candidate` tag line, so the Phase 7 backup
+carries them to the vault store and `/kuraka-harvest` sees them grouped across
+projects.
 
 ### 9. Back up the cycle state to the vault (MANDATORY — last step)
 
@@ -129,6 +177,31 @@ Idempotent. Do NOT skip: it (1) lets Kuraka learn from failures across ALL
 projects and (2) preserves the work outside the solution's git so a branch switch
 can't lose it (`kuraka-restore.py` pastes it back on the next mount). Confirm
 the command exited 0.
+
+**It will exit 1 if the RETRO you just wrote has no `## Confidence:` line** — the
+state is snapshotted, but the cycle does not close until you add it and re-run
+(the `meta.yaml` then fills in by itself). This is enforced in the script rather
+than in a hook so that it holds on EVERY platform: only Claude has hooks, and on
+the others prose alone left whole projects of verdict-less cycles. A cycle with
+no telemetry is warned about, not blocked.
+
+### 10. Verify the state actually landed (exit 0 is not evidence)
+
+```bash
+python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-doctor.py" <project-root>
+```
+
+Re-reads the central store and confirms what step 9 was supposed to produce:
+this cycle's RETRO archived, its telemetry attached, the agent tuning applied in
+step 8 snapshotted as an override, `docs/process` mirrored, the mount manifest
+stamped with the current suite, and the config's `project.name` still agreeing
+with the slug the store uses. Record its verdict in the RETRO.
+
+Non-zero does NOT close the cycle: run it again with `--fix` (it applies the safe
+repairs and re-checks) and act on whatever remains — a missing mount manifest
+needs `kuraka-mount.py <project> --update`; a slug mismatch is a naming decision,
+never an automatic rewrite. Every silent breakage found in the 2026-08 store
+audit had passed a green `kuraka-backup` first.
 
 ### 10. Auto-trigger pattern-detector when due
 

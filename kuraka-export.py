@@ -286,7 +286,7 @@ def render_agents_md(project: Path, slug: str, cfg: dict, agents: list[tuple[str
 > Antigravity and any other AGENTS.md-aware tool.
 
 You are working in a project governed by **Kuraka**, a disciplined development
-workflow. {"Act as the orchestrator: delegate each phase to the native Codex agent named below, wait for its handoff, then run the gate before continuing." if target == "codex" else "Adopt the relevant role below per phase and follow the gated 8-phase flow as a checklist."}
+workflow. {"Outside the selected Ultra Ahorro mode, act as the orchestrator: delegate each phase to the native Codex agent named below, wait for its handoff, then run the gate before continuing." if target == "codex" else "Adopt the relevant role below per phase and follow the gated 8-phase flow as a checklist."}
 
 ## Stack
 
@@ -298,13 +298,21 @@ workflow. {"Act as the orchestrator: delegate each phase to the native Codex age
 {f'''## Codex/Kuraka Artifacts
 
 - Native Kuraka skills are available under `{skills_dir}/<name>/SKILL.md`.
+- **Ultra Ahorro (Codex only)**: `$kuraka-ahorro <task>` or
+  `$kuraka <task> --modo ultra-ahorro`. For this selected mode, the main session
+  implements and verifies directly with **zero subagents**. Read only
+  `{skills_dir}/kuraka-ahorro/SKILL.md` plus applicable project instructions.
+  This exception replaces the phase/delegation/gate requirements below for
+  eligible local changes; it does not relax permissions or correctness checks.
+  Do not preload the multi-phase workflow or token-history rules in this mode.
+  `workflow.codex_default_mode` optionally selects it without changing other tools.
 - Native Kuraka agents are available under `{agents_dir}/<name>.toml`.
 - Start the main workflow with `$kuraka <requirement>` or select `kuraka` from
   `/skills`. Codex reserves direct slash commands for its own command set.
 - Invoke the named agent sequentially for each phase; pass phase, approved input
   artifact, required skill, allowed paths, and expected output. Wait for its
   `DONE`, `CLARIFY`, `BLOCKED`, or `VALIDATION_FAILED` handoff before any gate.
-- Never implement, review, or approve a phase by adopting a specialist role in
+- Outside Ultra Ahorro, never implement, review, or approve a phase by adopting a specialist role in
   the orchestrator thread. Parallel delegation requires an explicit plan proving
   independent files and a merge order.
 
@@ -343,7 +351,7 @@ passes. Scale down (skip phases) only for trivial changes, and say which you ski
 - **Schema freeze before implementation** — no DB/contract changes mid-build.
 - **Green build ≠ runtime-correct** — exercise the real path (a live smoke) before
   declaring done; distinguish empty-state from broken-state.
-- **User approval between phases** — do not auto-advance through gates.
+- **Continuous execution:** Once the user has authorized the scope and mode, advance through passing gates without requesting further approval. Record each gate, checkpoint, and evidence; report progress without ending the turn. Pause only for unresolved material decisions, failed gates that cannot be remedied, explicit user pauses, or actions requiring separate authorization. Never waive a failed gate silently.
 
 ## Roles ({"delegate by native agent name" if target == "codex" else "adopt the mindset per phase"})
 
@@ -746,6 +754,8 @@ def _print_start_guide(env: str, project: Path | None) -> None:
         print("      • Proyecto nuevo (solo idea)       →  /inti  y luego  /arki  (greenfield)")
         print("      • ¿No sabés por dónde empezar?     →  /kuraka-wizard   (te guía)")
         print("      • Ya listo, a trabajar             →  /kuraka <requerimiento>")
+        print("      • Tarea local de bajo riesgo       →  /kuraka-ahorro <tarea>")
+        print("        (Ultra Ahorro: 0 subagentes, sin revisión independiente)")
     elif env == "cursor":
         print(f"   1. Abrí el proyecto en Cursor:  {proj}")
         print("   2. Reiniciá el chat de Cursor (para que tome AGENTS.md).")
@@ -765,6 +775,7 @@ def _print_start_guide(env: str, project: Path | None) -> None:
         print("      • ¿No sabés por dónde empezar?  →  $kuraka-wizard")
         print("      • Brownfield →  $amauta     · Greenfield →  $inti + $arki")
         print("      • A trabajar →  $kuraka <requerimiento>")
+        print("      • Ultra Ahorro (0 subagentes) →  $kuraka-ahorro <tarea local>")
         print("      Codex reserva `/...` para comandos internos: `/kuraka` no es registrable")
         print("      como alias local. El equivalente nativo es `$kuraka` o `/skills`.")
     elif env == "antigravity":

@@ -1,6 +1,6 @@
 ---
 name: analyze-testability
-description: "Analyze source code to determine what tests are needed. Identifies public API, dependencies to mock, test categories (happy / error / edge), and coverage strategy."
+description: "Analyze source code to find WHAT is still untested (never what a test should expect — expected values come from the plan/AC)." Identifies public API, dependencies to mock, test categories (happy / error / edge), and coverage strategy."
 agent: "`test-engineer`"
 phase: "6 — see `kuraka`"
 disable-model-invocation: true
@@ -9,8 +9,16 @@ user-invocable: false
 
 # Analyze Testability
 
-Analyze a source file to produce a test plan before writing any tests,
+Analyze a source file to find what is still untested (Phase 6 coverage gaps),
 for the project described in `kuraka.config.yaml`.
+
+**The code tells you WHAT to test, never WHAT to expect.** Use it to list
+untested functions, branches, error paths and dependencies to mock. The
+expected value of each test comes from the test plan's oracle, the AC, the
+frozen contract or a business rule — cite it. If the code's behavior
+contradicts the plan, report a finding (bug or spec gap); if no spec source
+determines the value, report a spec gap. Never freeze current behavior as the
+expectation: that test confirms the bugs it should catch.
 
 ## Input
 

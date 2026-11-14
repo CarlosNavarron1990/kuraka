@@ -30,7 +30,12 @@ the project described in `kuraka.config.yaml`.
      `.claude/project/conventions/cross-provider-conventions.md` or
      equivalent if present for the project's integration patterns).
 
-2. **Check existing tests** — don't duplicate, update instead.
+2. **Check existing tests** — don't duplicate, update instead. **If a
+   recorrido ran in this cycle** (`recorrido-e2e`,
+   `<e2e_root>/recorridos/<REQ>.spec.ts` + `smoke-tests/RECORRIDO-<REQ>.md`
+   with `PASS`), PROMOTE it instead of writing a new spec for the same flow:
+   move/import it into the regression suite, keep every assertion (UI and
+   backend), and only add specs for critical flows the recorrido did not walk.
 
 3. **Write Page Objects** for any new pages / components.
 
@@ -103,4 +108,9 @@ expected-reds, gating short-circuit, locale-aware dates.
     permission-gated control manifests, paginator/overlay quirks). The rules above are
     the universal pattern; the profile supplies the mechanics. If the profile lacks an
     "E2E mechanics" section, derive it from the code and propose adding it there.
-15. **Run `verify-output` before returning**.
+15. **No green by weakening; partial ≠ PASS** — a fix-run never deletes steps,
+    shortcuts navigation or loosens assertions without declaring a scope reduction
+    (diff the spec vs its pre-fix version); a run missing critical-path steps is
+    `PASS PARCIAL — n/m`; environment-cause claims need direct-vs-proxy ×N
+    measurements or stay `[UNVERIFIED]` (see `e2e-tester` rules 15–18).
+16. **Run `verify-output` before returning**.

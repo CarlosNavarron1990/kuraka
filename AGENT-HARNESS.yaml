@@ -125,7 +125,7 @@ agents:
   e2e-tester:
     profile: implementer
     maxTurns: 80
-    skills: "generate-e2e-tests"
+    skills: "generate-e2e-tests, recorrido-e2e"
 
   # -- pipeline: mechanical validators
   deployment-verifier:
@@ -158,3 +158,6 @@ agents:
     maxTurns: 80
   jira-ticket-sync:              # writes local md docs + needs Jira MCP tools
     maxTurns: 50
+  pr-writer:                     # drafts PR text only; never writes/commits/pushes
+    profile: reviewer
+    maxTurns: 40

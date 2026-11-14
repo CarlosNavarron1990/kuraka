@@ -13,6 +13,7 @@ CODEX_COMMAND_SKILLS = {
     "checkmarx-remediation",
     "inti",
     "kuraka",
+    "kuraka-ahorro",
     "kuraka-backup",
     "kuraka-update",
     "kuraka-wizard",
@@ -119,6 +120,9 @@ def test_codex_orchestrator_skill_overrides_claude_usage_assumptions(repo_root: 
     kuraka_skill = (codex_dir / "skills" / "kuraka" / "SKILL.md").read_text(encoding="utf-8")
     assert "## Codex Platform Override" in kuraka_skill
     assert "never fabricate `0`" in kuraka_skill
+    assert len(kuraka_skill.splitlines()) < 80
+    assert (codex_dir / "skills/kuraka/references/workflow.md").is_file()
+    assert (codex_dir / "skills/kuraka-ahorro/scripts/cycle.py").is_file()
 
     final_auditor = (codex_dir / "agents" / "final-auditor.toml").read_text(encoding="utf-8")
     assert "--layer-root .codex/project --skip-overrides" in final_auditor

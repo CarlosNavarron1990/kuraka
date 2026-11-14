@@ -52,6 +52,14 @@ Load context in this order.
 The detailed loading sequence lives in
 `.claude/agents/contexts/final-auditor-rules.md`.
 
+## Input — User validation ledger (Phase 6.9)
+
+Run `python3 "${KURAKA_VAULT}/kuraka-ajuste.py" estado <project-root> --req <REQ> --json`
+and build `## 7b) Efectividad` from it (rounds, adjustments verbatim, who should
+have caught each one). `falto-preguntar` / `falto-hacer` are the cycle's most
+direct evidence of a missing question or check — each one gets a project-layer
+patch tagged `harvest-candidate`. No ledger → `sin-registro`, reported as a finding.
+
 ## Input — Token Telemetry
 
 Read the telemetry file captured during the cycle:
@@ -82,6 +90,21 @@ Expected shape (one entry per agent invocation, in order):
 }
 ```
 
+**Agent-binding check (mandatory, fails the closure):** every phase slot in the
+telemetry (and in `HOOK-LOG.jsonl`, whose `agent` field is the real
+`subagent_type`) must name the mapped specialist agent. A generic agent —
+`general-purpose`, `Explore`, `Plan`, `fork`, or an empty type — in a phase slot
+is a **finding that blocks the cycle's closure**: the role prompt lived only in
+the orchestrator's context, the model tier was not the routed one, and the run's
+numbers can't be attributed (sie-v2 DD-1530: every phase ≥3 ran as
+`general-purpose`; possuite: fused `po-analyst+story-refiner+…` slots). Record it
+under "Systemic Issues" with the remediation (`/kuraka-doctor`, re-mount).
+
+**Self-reported numbers are not telemetry.** Token/tool-use counts written by an
+agent in its own report are ignored; only harness `usage` (or the hook log)
+counts. If a number in the telemetry file has no harness source, mark it
+`[ESTIMACIÓN NO MEDIDA]` (azure: self-reports ran below the harness in 6/7 runs).
+
 If the file is missing, note it in the retro under "Systemic Issues" and continue.
 
 ## Output
@@ -89,7 +112,9 @@ If the file is missing, note it in the retro under "Systemic Issues" and continu
 Create a retrospective file at:
 `${architecture.paths.docs_process_root}/agent-retrospectives/RETRO-{REQ-name}.md`
 
-Also update `RETRO-LATEST.md` as a symlink or copy of the latest retro.
+Also update `RETRO-LATEST.md` as a symlink to the latest retro: `ln -sfn RETRO-{REQ}.md RETRO-LATEST.md`.
+NEVER `cp` or write onto an existing `RETRO-LATEST.md` — through a symlink that overwrites the PREVIOUS
+cycle's retro (guai-home: 31 KB RETRO clobbered by a 166 B stub). No symlinks → `rm -f` it first, then copy.
 
 ### Retrospective Structure
 
@@ -188,6 +213,22 @@ For each:
 - Mandatory naming checks: ...
 - Mandatory schema checks: ...
 
+## 7b) Efectividad (validación del usuario)
+<!-- Built from `python3 "${KURAKA_VAULT}/kuraka-ajuste.py" estado <root> --req <REQ> --json`
+     (Phase 6.9 ledger, `ajustes/AJUSTES-<REQ>.md`). Never re-derived from memory. -->
+- Aceptación: `<primera-ronda | tras-N-rondas | sin-aceptacion | sin-registro>` · rondas: N · ajustes: N · faltó preguntar/hacer: N · pendientes: N
+
+| # | Tipo | Debió detectarlo | Pedido del usuario (textual) | Patch aplicado (capa del proyecto) |
+|---|------|------------------|------------------------------|------------------------------------|
+
+For EVERY `falto-preguntar` / `falto-hacer` row: a concrete patch to the project
+layer — the `.append.md` of the agent named in "debió" (a question it must ask,
+a check it must run), a `lessons-learned/` entry, or a `review-checks/` line —
+applied in this phase and tagged `harvest-candidate` so `/kuraka-harvest` can
+lift it into the vault. `bug` / `ux` rows: say which gate or recorrido step
+should have failed and didn't. `sin-registro` (no ledger) is itself a finding:
+the cycle closed without the user's validation being recorded.
+
 ## 8) Token & Latency Telemetry
 
 Ranked by `total_tokens` descending. Flag any agent whose tokens or
@@ -221,6 +262,8 @@ duration look disproportionate to the task.
    correction cycle is one loop.
 7. **Distinguish user preference from bug** — a naming preference
    correction is different from a logic bug.
+8. **Run hygiene** — `agents/contexts/subagent-hygiene.md` applies to you
+   (read-only git, declared output exists before you report it).
 
 ## When an Agent Did Well
 
