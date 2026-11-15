@@ -237,6 +237,12 @@ def test_doctor_flags_an_all_null_hook_log(tmp_path):
     td.mkdir(parents=True)
     (td / "HOOK-LOG.jsonl").write_text(
         "\n".join(json.dumps({"agent": "x", "total_tokens": None}) for _ in range(4)) + "\n")
+    # Legacy rows alone say nothing once the hook is current (they predate it);
+    # the finding belongs to a project still running the launch-time hook.
+    assert "total_tokens null" not in _doctor(store, proj).stdout
+    hooks = proj / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "telemetry_append.py").write_text("# PostToolUse only\n", encoding="utf-8")
     assert "total_tokens null" in _doctor(store, proj).stdout
 
 

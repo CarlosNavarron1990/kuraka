@@ -459,12 +459,17 @@ Every `Agent` invocation returns a `<usage>` block with `total_tokens`,
 so the `final-auditor` (Phase 7) can analyze consumption by agent.
 
 *(Claude Code: capture COMPLETENESS is enforced by harness — the
-`telemetry_append` PostToolUse hook appends every subagent run to
-`agent-telemetry/HOOK-LOG.jsonl` automatically. Your job is to ENRICH each
+`telemetry_append` hook writes two rows per subagent to
+`agent-telemetry/HOOK-LOG.jsonl`, joined by `agent_id`: `event: "launch"` when
+it starts (subagents run in the background, so there is NO cost yet) and
+`event: "stop"` when it finishes, with `total_tokens` / `tool_uses` /
+`duration_ms` / `turns` read from the agent's own transcript. Take each run's
+numbers from its `stop` row — never estimate them. Your job is to ENRICH each
 run into the REQ's telemetry JSON below — phase, `budget_ok`, `tool_uses_ok`,
-`resumed`/`tokens_incremental` — and, at Phase 7, reconcile the curated JSON
-against HOOK-LOG.jsonl: any run present in the log but missing from the JSON
-is a debt to justify.)*
+`resumed`/`tokens_incremental`, `rework` — and `kuraka-close.py` reconciles the
+curated JSON against HOOK-LOG.jsonl at Phase 7: a run in the log but missing
+from the JSON is a debt to justify, and a `launch` with no `stop` is an agent
+that never finished.)*
 <!-- kuraka:discipline:telemetry -->
 
 **File**:
@@ -477,6 +482,7 @@ is a debt to justify.)*
    {
      "req_name": "REQ-YYYY-MM-DD-slug",
      "mode": "normal | reduced | lite | retroactive",
+     "size": "S | M | L",
      "runs": []
    }
    ```
@@ -497,11 +503,17 @@ is a debt to justify.)*
      "budget_ok": true,
      "tool_uses_ok": true,
      "resumed": false,
-     "tokens_incremental": null
+     "tokens_incremental": null,
+     "rework": false
    }
    ```
 3. If an agent is invoked multiple times in the same phase, each
-   invocation is its own entry — use `mode` to disambiguate.
+   invocation is its own entry — use `mode` to disambiguate. Set
+   `"rework": true` on every run that exists because an earlier one was not
+   good enough (a fix after review, a retry, a delta) — NOT on planned runs
+   such as one implementation run per story. `kuraka-backup` counts them into
+   the cycle's `meta.yaml` (`retrabajo`), the number suite versions are
+   compared by.
 4. If you do **not** use `Agent` for a phase (direct orchestrator work),
    write a 0-token entry with `"agent": "orchestrator"` and the phase label, so
    the checkpoint ↔ telemetry reconciliation does not report a false debt.

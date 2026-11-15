@@ -10,6 +10,8 @@ behaviour matches. Resolve the vault from $KURAKA_VAULT or this file's own dir.
   kuraka mount --target codex|cursor|antigravity [dir]
   kuraka init  [dir]                       one-shot install (inspect+config+skeleton+mount+register)
   kuraka update                            update the framework in the project above CWD
+  kuraka preflight [dir] --req REQ [--tests]  environment check before Phase 1 (opens the cycle)
+  kuraka close [dir] --req REQ | --list    close the cycle (verdict+acceptance+telemetry+backup) / --abandonar
   kuraka backup  [dir]                     snapshot this project's Kuraka state to the central store
   kuraka restore [dir]                     restore this project's Kuraka history from the store
   kuraka inspect [dir]                     detect the stack
@@ -166,6 +168,11 @@ def main(argv: list[str]) -> int:
     if sub == "backup":
         root = find_project_root(Path(rest[0])) if rest else find_project_root()
         return py("kuraka-backup.py", str(root or (rest[0] if rest else os.getcwd())))
+    if sub in ("preflight", "close"):
+        # first arg is the project dir unless it is a flag
+        d = rest.pop(0) if rest and not rest[0].startswith("-") else None
+        root = find_project_root(Path(d)) if d else find_project_root()
+        return py(f"kuraka-{sub}.py", str(root or d or os.getcwd()), *rest)
     if sub == "restore":
         root = find_project_root(Path(rest[0])) if rest else find_project_root()
         return py("kuraka-restore.py", str(root or (rest[0] if rest else os.getcwd())))

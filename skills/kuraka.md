@@ -34,7 +34,29 @@ Also required: `kuraka.config.yaml` at the project root. If missing, ask
 the user to run `kuraka init` (or copy the template from the framework's
 `kuraka-artifacts/config-schema.yaml`).
 
-**Preflight — run BEFORE Phase 1** (once per cycle; ~2 s, no model cost):
+**Environment preflight — run BEFORE the first agent** (once the REQ name,
+mode and size are fixed; no model cost). It opens the cycle:
+
+```bash
+python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-preflight.py" <project-root> --req <REQ> --mode <mode> --size <S|M|L> --tests
+```
+
+It checks git state, that every gate command in `kuraka.config.yaml` is real
+and runnable, `.env` vs `.env.example`, installed dependencies, docker and the
+compose ports, migration heads, and (`--tests`) runs the test gates as the
+cycle's BASELINE. It writes `checkpoints/PREFLIGHT-<REQ>.json` — the cycle's
+start marker (`kuraka-close.py` uses it to attribute telemetry) and the record
+of what was already broken before the cycle touched anything.
+- Exit 1 = a blocker (`✗`). Show the lines to the user and STOP: never spend an
+  agent diagnosing the environment (118 of 295 RETROs paid for that in Phase 4
+  or 6).
+- A baseline that is already RED is a user decision, not yours: fix first, or
+  re-run with `--permitir-base-roja "<user's reason>"`. From then on a failure
+  that was in the baseline is not the cycle's; any other one is.
+- Lite mode may drop `--tests`. Re-running it mid-cycle is safe (the original
+  start is kept).
+
+**State preflight** (same moment; ~2 s, no model cost):
 
 ```bash
 python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-doctor.py" <project-root>
@@ -781,13 +803,20 @@ Gate: `kuraka-ajuste.py estado --req <REQ>` shows `aceptacion` ≠
     --json`: every `falto-preguntar` / `falto-hacer` becomes a project-layer
     patch applied here and tagged `harvest-candidate`.
 - **Agent Tuning & Patch Application:** Apply approved project-layer or agent prompt patches directly to the project's mounted agent files (`.agents/agents/`, `.agents/skills/`, `.agents/project/` for Antigravity; `.claude/` for Claude Code; `.cursor/` for Cursor; `.codex/` for Codex). This closes the retro-apply loop so future cycles benefit from tuned agent behavior.
-- **MANDATORY last step — vault backup (never skip):** after the RETRO is
-  written and patches applied, snapshot the project's full Kuraka state into the central vault store:
+- **MANDATORY last step — close the cycle (never skip):** after the RETRO is
+  written and patches applied:
   ```bash
-  python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-backup.py" <project-root> [--target <antigravity|claude|cursor|codex>]
+  python3 "${KURAKA_VAULT:-/Users/xmn/Documents/Agentes/AgentesTrabajos/kuraka}/kuraka-close.py" <project-root> --req <REQ> [--target <antigravity|claude|cursor|codex>]
   ```
+  One command, one gate: RETRO verdict · user acceptance (6.9) · locked
+  acceptance tests intact · telemetry reconciled against `HOOK-LOG.jsonl` (and
+  DERIVED from it if you never wrote the curated JSON) · then `kuraka-backup`,
+  which archives the cycle and stamps `mode` / `size` / `invocaciones` /
+  `retrabajo` / `tokens_total` into its `meta.yaml`. Print its final line to
+  the user. A cycle that will not be finished is closed too, never left open:
+  `kuraka-close.py <root> --req <REQ> --abandonar --motivo "…"`.
   This is a hard exit criterion: Phase 7 is NOT complete until this command
-  exits 0 — and since 2026-09 it **refuses to close a cycle whose RETRO has no
+  exits 0 — the backup inside it **refuses to close a cycle whose RETRO has no
   `## Confidence:` line** (exit 1; the state is still snapshotted, it is the
   CYCLE that stays open). That check lives in the script, not in a hook, because
   the script is the only gate every platform runs: Antigravity / Cursor / Codex
@@ -928,6 +957,7 @@ For Normal mode, add at the start of the REQ:
      box is [x] only if its phase id is in phases_completed. The rows for
      3.9, 6.8, 6.9 and 7 are NEVER deleted from the block: if the mode skips one,
      the row stays with "SKIPPED — <reason>". -->
+- [ ] Phase 0: Environment preflight — `kuraka-preflight.py --req <REQ>` exit 0 (baseline: green | red-accepted | not run)
 - [ ] Phase 1+2+2.5: PO Analysis + Stories + Test Plan (`po-analyst` COMBINED — default)
       <!-- split into three lines ONLY when a trigger forced separate agents; name the trigger -->
 - [ ] Phase 3: Architect Review + Schema Freeze (CONDITIONAL — schema / new endpoint / contract; if omitted, state the absent trigger)
@@ -943,7 +973,7 @@ For Normal mode, add at the start of the REQ:
 - [ ] Phase 6.8: Smoke test runtime (MANDATORY — skip only with explicit justification)
 - [ ] Phase 6.9: User validation — `kuraka-ajuste.py aceptar` (rounds: N · adjustments: N · faltó: N)
 - [ ] Phase 7: Final Audit (RETRO created, with `## Efectividad`)
-- [ ] Phase 7: Vault backup — `kuraka-backup.py` exited 0 (MANDATORY — closes the cycle)
+- [ ] Phase 7: Cycle closed — `kuraka-close.py --req <REQ>` exited 0 (MANDATORY — runs the vault backup)
 - [ ] Phase 7: State verified — `kuraka-doctor.py` sin hallazgos (el backup dejó lo que decía dejar)
 
 Planned invocations: N  (budget ≈ N × 150K — see §Initial decision)

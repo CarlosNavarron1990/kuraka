@@ -1538,6 +1538,187 @@ def _attach_ajustes(dest: Path, req: str, project: Path, docs_root: str) -> bool
     return changed
 
 
+# --- cycle metrics (mode / size / invocations / rework) ----------------------
+# Without these in meta.yaml two suite versions cannot be compared: 294 cycles
+# archived by 2026-11 and not one recorded its mode. Derived, never hand-typed.
+
+_REWORK_RE = re.compile(
+    r"fix|delta|retry|re-?run|reintento|rework|retrabajo|round|ronda|iter", re.I)
+METRIC_KEYS = ("mode", "size", "invocaciones", "retrabajo", "tokens_total",
+               "telemetria")
+
+
+def read_hook_log(path: Path) -> list[dict]:
+    out: list[dict] = []
+    try:
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(row, dict):
+                out.append(row)
+    except OSError:
+        pass
+    return out
+
+
+def hook_runs(rows: list[dict], since: "str | None" = None,
+              until: "str | None" = None) -> list[dict]:
+    """Collapse HOOK-LOG rows into ONE entry per subagent.
+
+    launch+stop rows join on agent_id; several stop rows (a resumed agent) keep
+    the last (cumulative) one. A launch with no stop is returned with
+    `lost: True` and null cost. A synchronous `run` row (the harness's own
+    totals, authoritative) merges into the same entry. Legacy rows (no `event`)
+    pass through. `since`/`until` are ISO timestamps (string compare on the
+    UTC `ts` the hook writes)."""
+    def inside(r: dict) -> bool:
+        ts = str(r.get("ts") or "")
+        return (not since or ts >= since) and (not until or ts <= until)
+
+    by_id: dict[str, dict] = {}
+    out: list[dict] = []
+    for r in rows:
+        ev = r.get("event")
+        aid = r.get("agent_id")
+        if ev in ("launch", "stop", "run") and aid:
+            cur = by_id.get(aid)
+            if cur is None:
+                cur = by_id[aid] = {"agent_id": aid, "lost": True, "ts": r.get("ts"),
+                                    "agent": r.get("agent"), "total_tokens": None}
+                out.append(cur)
+            if ev == "launch":
+                cur.update({k: r[k] for k in ("agent", "description", "model")
+                            if r.get(k) and not cur.get(k)})
+                cur["ts"] = r.get("ts") or cur.get("ts")
+                if r.get("agent"):
+                    cur["agent"] = r["agent"]  # the launch names the real subagent_type
+            elif ev == "run":
+                # foreground subagent: the tool response carried the totals
+                cur.update({k: r[k] for k in ("total_tokens", "tool_uses", "duration_ms",
+                                              "description", "model") if r.get(k) is not None})
+                if r.get("agent"):
+                    cur["agent"] = r["agent"]
+                cur.update({"lost": False, "partial": False, "exact": True})
+            else:
+                keep = {k: cur[k] for k in ("agent", "total_tokens", "tool_uses", "duration_ms")
+                        if cur.get("exact") and cur.get(k) is not None}
+                if cur.get("agent") and "agent" not in keep:
+                    keep["agent"] = cur["agent"]
+                cur.update({k: v for k, v in r.items() if k not in ("event", "source")})
+                cur.update(keep)
+                if cur.get("exact"):
+                    cur["partial"] = False
+                cur["lost"] = False
+                cur["stop_ts"] = r.get("ts")
+        else:
+            out.append({**r, "lost": False})
+    return [r for r in out if inside(r)]
+
+
+def is_rework_run(run: dict) -> bool:
+    """A curated telemetry run that exists because a previous one was not good
+    enough: an explicit flag, attempt > 1, or a fix/delta/retry phase label."""
+    if run.get("rework") is True:
+        return True
+    try:
+        if int(run.get("attempt") or 1) > 1:
+            return True
+    except (TypeError, ValueError):
+        pass
+    label = f"{run.get('phase', '')} {run.get('variant') or ''}"
+    return bool(_REWORK_RE.search(label))
+
+
+def cycle_metrics(telemetry: "Path | None") -> dict:
+    """mode / size / invocations / rework rounds / total tokens of one cycle,
+    from its telemetry JSON. Missing file or unknown shape -> empty values, and
+    `telemetria` says where the numbers came from (curada | hook | "")."""
+    out = {"mode": "", "size": "", "invocaciones": 0, "retrabajo": 0,
+           "tokens_total": 0, "telemetria": ""}
+    if telemetry is None or not telemetry.is_file():
+        return out
+    try:
+        data = json.loads(telemetry.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return out
+    if not isinstance(data, dict):
+        return out
+    runs = data.get("runs")
+    if not isinstance(runs, list):
+        return out
+    runs = [r for r in runs if isinstance(r, dict)
+            and str(r.get("agent") or "") != "orchestrator"]
+    out["telemetria"] = "hook" if data.get("source") == "hook-derived" else "curada"
+    out["mode"] = str(data.get("mode") or "").strip().lower()[:24]
+    sizes = [str(r.get("size") or "").strip().upper()[:1] for r in runs]
+    size = str(data.get("size") or "").strip().upper()[:1]
+    if size not in ("S", "M", "L"):
+        ranked = [s for s in sizes if s in ("S", "M", "L")]
+        size = max(ranked, key="SML".index) if ranked else ""
+    out["size"] = size
+    out["invocaciones"] = len(runs)
+    out["retrabajo"] = sum(1 for r in runs if is_rework_run(r))
+    total = 0
+    for r in runs:
+        v = r.get("tokens_incremental") if r.get("resumed") else None
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            v = r.get("total_tokens", r.get("tokens"))
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            total += int(v)
+    out["tokens_total"] = total
+    return out
+
+
+def _attach_metrics(dest: Path) -> bool:
+    """Stamp cycle_metrics into an archived cycle's meta.yaml from the telemetry
+    file ALREADY in `dest`. Idempotent; True if meta.yaml changed. Runs on every
+    backup, so it also backfills cycles archived before the fields existed."""
+    meta_p = dest / "meta.yaml"
+    if not meta_p.is_file():
+        return False
+    telem = next(iter(sorted(dest.glob("*" + TELEMETRY_SUFFIX))), None)
+    if telem is None:
+        telem = next((f for f in sorted(dest.glob("*.json"))), None)
+    m = cycle_metrics(telem)
+    text = meta_p.read_text(encoding="utf-8", errors="ignore")
+    lines = [l for l in text.splitlines()
+             if not l.startswith(tuple(k + ":" for k in METRIC_KEYS))]
+    if m["telemetria"]:
+        lines += [f'mode: "{m["mode"]}"', f'size: "{m["size"]}"',
+                  f'invocaciones: {m["invocaciones"]}', f'retrabajo: {m["retrabajo"]}',
+                  f'tokens_total: {m["tokens_total"]}', f'telemetria: "{m["telemetria"]}"']
+    new = "\n".join(lines) + "\n"
+    if new == text:
+        return False
+    try:
+        meta_p.write_text(new, encoding="utf-8")
+    except OSError:
+        return False  # a read-only store entry must not fail the backup
+    return True
+
+
+ABANDONED = "ABANDONED"
+
+
+def abandon_cycle(vault: Path, slug: str, req: str, motivo: str, branch: str,
+                  suite: str) -> Path:
+    """Close a cycle that will never get a RETRO: a store entry with verdict
+    ABANDONED and the reason. It stops being reported as open, and harvest can
+    count abandonment instead of guessing from silence (~100 open cycles in
+    2026-11, none distinguishable from 'forgot to close')."""
+    dest = cycles_dir(vault, slug) / req
+    dest.mkdir(parents=True, exist_ok=True)
+    motivo = " ".join(str(motivo).split()).replace('"', "'")
+    (dest / "meta.yaml").write_text(
+        f"project: {slug}\nreq: {req}\nbranch: {branch}\n"
+        f"archived_at: {date.today().isoformat()}\nsource_retro: \"\"\n"
+        f"has_telemetry: false\nsuite_version: \"{suite}\"\n"
+        f"verdict: \"{ABANDONED}\"\nmotivo: \"{motivo}\"\n", encoding="utf-8")
+    return dest
+
+
 def archive_cycles(project: Path, vault: Path, slug: str, branch: str,
                    docs_root: str, force: bool) -> list[dict]:
     """Copy each cycle's RETRO (+ telemetry) into <vault>/projects/<slug>/cycles/<REQ>/.
@@ -1576,6 +1757,8 @@ def archive_cycles(project: Path, vault: Path, slug: str, branch: str,
                 was_empty and 'verdict: ""' not in meta_p.read_text(encoding="utf-8", errors="ignore"))
             if _attach_ajustes(dest, req, project, docs_root):
                 updated = True
+            if _attach_metrics(dest):
+                updated = True
             rows.append({"req": req, "status": "updated" if updated else "skip",
                          **({"telem_added": True} if added else {}),
                          **({"verdict_added": True} if fixed else {})})
@@ -1595,6 +1778,7 @@ def archive_cycles(project: Path, vault: Path, slug: str, branch: str,
             encoding="utf-8",
         )
         _attach_ajustes(dest, req, project, docs_root)
+        _attach_metrics(dest)
         rows.append({"req": req, "status": "archived", "verdict": verdict,
                      "telem": telem is not None, "branch": branch})
     return rows

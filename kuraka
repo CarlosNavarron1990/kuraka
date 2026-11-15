@@ -65,6 +65,10 @@ usage() {
                            (codex requiere un paso extra para instalar los comandos en ~/.codex)
   kuraka init  [dir]       instalación one-shot (inspect+config+skeleton+mount+registro)
   kuraka update            actualizar el framework en el proyecto sobre la carpeta actual
+  kuraka preflight [dir] --req REQ [--mode M --size S --tests]
+                           chequear el entorno ANTES de la fase 1 (gates, .env, deps, docker, migraciones, línea base)
+  kuraka close [dir] --req REQ | --list | --req REQ --abandonar --motivo "…"
+                           cerrar el ciclo (veredicto + aceptación + telemetría + backup) o abandonarlo
   kuraka backup  [dir]     respaldar el estado Kuraka (layer+state+cycles+overrides) al store central
   kuraka restore [dir]     restaurar la historia del proyecto (incl. overrides de agentes) desde el store
   kuraka inspect [dir]     detectar el stack
@@ -128,6 +132,12 @@ case "$sub" in
   backup)
     root="$(find_project_root "${1:-$PWD}")" || root="${1:-$PWD}"
     "$PY" "$VAULT/kuraka-backup.py" "$root"
+    ;;
+  preflight|close)
+    # first arg is the project dir unless it is a flag
+    if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then dir="$1"; shift; else dir="$PWD"; fi
+    root="$(find_project_root "$dir")" || root="$dir"
+    "$PY" "$VAULT/kuraka-$sub.py" "$root" "$@"
     ;;
   restore)
     root="$(find_project_root "${1:-$PWD}")" || root="${1:-$PWD}"

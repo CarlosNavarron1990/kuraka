@@ -1,0 +1,30 @@
+{
+ "session_id": "c6b34858-b4e7-4c70-95a9-b27a73f5422c",
+ "transcript_path": "__SET_BY_TEST__",
+ "cwd": "__SET_BY_TEST__",
+ "prompt_id": "f387bfc9-3440-498a-ab86-bec4cc6bee4e",
+ "permission_mode": "default",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "tool_name": "Agent",
+ "tool_input": {
+  "description": "Reply with ok",
+  "prompt": "Reply with the single word ok",
+  "subagent_type": "general-purpose"
+ },
+ "tool_response": {
+  "isAsync": true,
+  "status": "async_launched",
+  "agentId": "a83054bbdc1a6d9a4",
+  "description": "Reply with ok",
+  "resolvedModel": "claude-haiku-5-5",
+  "prompt": "Reply with the single word ok",
+  "outputFile": "__SET_BY_TEST__",
+  "canReadOutputFile": true,
+  "canContinueAgent": true
+ },
+ "tool_use_id": "toolu_01VagJV4hb8ap1dxx3ew3Zoq",
+ "duration_ms": 10
+}

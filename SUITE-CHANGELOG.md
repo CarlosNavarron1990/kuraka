@@ -27,7 +27,55 @@ que con la N = la integración funcionó.
 
 ## Sin publicar (pendiente de bump por `/kuraka-harvest`)
 
-_(vacío)_
+Origen: análisis de los 294 ciclos archivados (2026-11-14). Tres huecos sin dueño
+determinístico; los tres se cubren con scripts, sin tocar agentes.
+
+### Corregido
+- **Telemetría del hook: 869 de 869 filas con `total_tokens` null (9 proyectos).**
+  Causa real, verificada con payloads capturados de Claude Code 2.1.325: los
+  subagentes se lanzan en segundo plano y la respuesta de `PostToolUse` es solo un
+  acuse `async_launched`, sin costo. Los dos arreglos anteriores (más nombres de
+  clave) no podían funcionar. `hooks/telemetry_append.py` ahora escribe dos filas
+  por subagente unidas por `agent_id`: `launch` al lanzar y `stop` en
+  `SubagentStop`, con el costo leído del transcript del agente (uso deduplicado
+  por id de mensaje; espera hasta 1,5 s a que entre el último turno y, si no
+  entra, marca `partial` para que `kuraka-close` lo recalcule). Un `launch` sin
+  `stop` = agente que nunca terminó. Cableado: matcher `Task|Agent` +
+  `SubagentStop`. Probado en vivo con el hook montado.
+- `kuraka-doctor [telemetry]`: distingue hook viejo, hook sin conectar a
+  `SubagentStop`, lanzamientos sin ningún `stop`, y `stop` sin tokens. Las filas
+  viejas dejan de dar hallazgo una vez montado el hook nuevo.
+
+### Añadido
+- **`kuraka-preflight.py`** (fase 0, 0 tokens): estado de git, gates del config
+  reales y ejecutables (binario en PATH, target de Makefile), `.env` vs
+  `.env.example`, dependencias, docker y puertos del compose, heads de alembic y
+  — con `--tests` — la línea base de tests antes de tocar nada. Con `--req`
+  escribe `checkpoints/PREFLIGHT-<REQ>.json`: marca de apertura del ciclo
+  (`started_at`, modo, tamaño). Qué mejora: 118 de 295 RETROs mencionan el
+  entorno, descubierto por agentes en fase 4 o 6.
+- **`kuraka-close.py`**: un solo gate de cierre — veredicto del RETRO,
+  aceptación del usuario (6.9), tests bloqueados intactos, telemetría conciliada
+  contra HOOK-LOG (y DERIVADA de él si el orquestador no la escribió) y backup.
+  `--abandonar --motivo` cierra un ciclo sin RETRO con veredicto `ABANDONED`;
+  `--list` muestra los abiertos. Qué mejora: 132 de 294 ciclos sin veredicto, 98
+  sin telemetría, ~100 abiertos sin poder distinguir abandono de olvido.
+- **Métricas por ciclo en `meta.yaml`**: `mode`, `size`, `invocaciones`,
+  `retrabajo`, `tokens_total`, `telemetria` (`curada` | `hook`), derivadas de la
+  telemetría por `kuraka_common.cycle_metrics` en cada backup (rellena también
+  los ciclos ya archivados: 175 con datos). La telemetría curada gana `size` al
+  tope y `rework: true` por corrida. Qué mejora: sin esto dos versiones de la
+  suite no se podían comparar.
+- CLI: `kuraka preflight` y `kuraka close` (bash y Windows).
+
+### Cambiado
+- `skills/kuraka.md`: preflight de entorno antes del primer agente (fila "Phase
+  0" en Workflow Status); la fase 7 cierra con `kuraka-close.py`.
+- `skills/kuraka-policies.md`: los números de cada corrida se toman de la fila
+  `stop`, nunca se estiman.
+
+### Resultados
+_pendiente_
 
 ---
 

@@ -1,0 +1,26 @@
+{
+ "session_id": "c6b34858-b4e7-4c70-95a9-b27a73f5422c",
+ "transcript_path": "__SET_BY_TEST__",
+ "cwd": "__SET_BY_TEST__",
+ "prompt_id": "f387bfc9-3440-498a-ab86-bec4cc6bee4e",
+ "permission_mode": "default",
+ "agent_id": "a83054bbdc1a6d9a4",
+ "agent_type": "general-purpose",
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "SubagentStop",
+ "stop_hook_active": false,
+ "agent_transcript_path": "__SET_BY_TEST__",
+ "last_assistant_message": "ok",
+ "background_tasks": [
+  {
+   "id": "a83054bbdc1a6d9a4",
+   "type": "subagent",
+   "status": "running",
+   "description": "Reply with ok",
+   "agent_type": "general-purpose"
+  }
+ ],
+ "session_crons": []
+}

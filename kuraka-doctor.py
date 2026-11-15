@@ -187,14 +187,16 @@ def repo_findings(vault: Path, project: Path, slug: str, docs_root: str) -> list
                                     f"fase 7: " + ", ".join(accepted[-4:]) + (" …" if len(accepted) > 4 else ""),
                           "manual",
                           "corré la fase 7 (final-auditor → RETRO con `## Efectividad`) y después "
-                          f"python3 {vault}/kuraka-backup.py {project}"))
+                          f"python3 {vault}/kuraka-close.py {project} --req <REQ>"))
         opened = [r for r in opened if r not in accepted]
     if opened:
         findings.append(F("cycles", f"{len(opened)} ciclo(s) abierto(s) sin RETRO (>24 h): "
                                     + ", ".join(opened[-4:]) + (" …" if len(opened) > 4 else ""),
                           "manual",
-                          "cerralo (fase 7: RETRO + kuraka-backup) o, si se abandonó, dejá una línea "
-                          "en el REQ (`Estado: abandonado — motivo`) y archivá un RETRO corto"))
+                          f"cerralo (fase 7: RETRO, después `python3 {vault}/kuraka-close.py "
+                          f"{project} --req <REQ>`) o, si se abandonó: `kuraka-close.py {project} "
+                          "--req <REQ> --abandonar --motivo \"…\"`  ·  lista: `kuraka-close.py "
+                          f"{project} --list`"))
     stashes = stashed_kuraka_state(project, docs_root)
     if stashes:
         def _tops(paths: list) -> list:
@@ -305,7 +307,9 @@ def diagnose(vault: Path, project: Path, slug: str, docs_root: str) -> list:
     # manual prose, and that is how camisassis closed 16 cycles with none.
     if dated:
         last_c = max(dated)[1]
-        if not any((cyc_dir / last_c).glob("*.json")):
+        last_meta = (cyc_dir / last_c / "meta.yaml").read_text(encoding="utf-8", errors="ignore")
+        if (f'verdict: "{kc.ABANDONED}"' not in last_meta
+                and not any((cyc_dir / last_c).glob("*.json"))):
             findings.append(F("telemetry", f"el último ciclo cerrado ({last_c}) se archivó "
                                            f"sin telemetría", "manual",
                               "escribí `<REQ>-telemetry.json` en "
@@ -333,22 +337,50 @@ def diagnose(vault: Path, project: Path, slug: str, docs_root: str) -> list:
             findings.append(F("state", f"docs/process: {n_dst} de {n_src} archivos en el store",
                               "backup"))
 
-    # Telemetry hook that captures runs but never their cost (6 projects logged
-    # 100% null total_tokens before the hook parsed structured usage).
+    # Telemetry hook that captures runs but never their cost. Claude Code
+    # launches subagents in the background, so the cost only exists at
+    # SubagentStop (`event: stop` rows); a hook that reads it at launch logged
+    # 100% null total_tokens in 9 projects.
     hook_log = project / docs_root / "agent-telemetry" / "HOOK-LOG.jsonl"
+    hook_py = project / ".claude" / "hooks" / "telemetry_append.py"
     if hook_log.is_file():
-        rows = []
-        for line in hook_log.read_text(encoding="utf-8", errors="ignore").splitlines()[-200:]:
-            try:
-                rows.append(json.loads(line))
-            except Exception:
-                continue
-        if len(rows) >= 3 and all(r.get("total_tokens") is None for r in rows):
-            findings.append(F("telemetry", f"HOOK-LOG.jsonl: {len(rows)} fila(s) recientes, todas con "
-                                           "total_tokens null — el hook registra la corrida pero no su costo",
+        rows = kc.read_hook_log(hook_log)[-200:]
+        current = hook_py.is_file() and "SubagentStop" in hook_py.read_text(
+            encoding="utf-8", errors="ignore")
+        try:
+            wired = "telemetry_append" in json.dumps(
+                {f.name: json.loads(f.read_text(encoding="utf-8")).get("hooks", {}).get("SubagentStop")
+                 for f in ((project / ".claude" / "settings.json"),
+                           (project / ".claude" / "settings.local.json")) if f.is_file()})
+        except Exception:
+            wired = True  # unreadable settings is another check's finding
+        launches = [r for r in rows if r.get("event") == "launch"]
+        stops = [r for r in rows if r.get("event") in ("stop", "run")]
+        legacy = [r for r in rows if not r.get("event")]
+        if hook_py.is_file() and not current:
+            if len(legacy) >= 3 and all(r.get("total_tokens") is None for r in legacy):
+                findings.append(F("telemetry", f"HOOK-LOG.jsonl: {len(legacy)} fila(s), todas con "
+                                               "total_tokens null — el hook montado lee el costo al LANZAR "
+                                               "el subagente, cuando todavía no existe",
+                                  "manual",
+                                  "re-montá con `kuraka-mount.py --update`: el hook nuevo lo toma del "
+                                  "transcript al terminar el agente (fila `event: stop`)"))
+        elif current and not wired:
+            findings.append(F("telemetry", "telemetry_append no está conectado a SubagentStop en "
+                                           ".claude/settings*.json — se registran los lanzamientos pero "
+                                           "nunca el costo", "remount"))
+        elif len(launches) >= 3 and not stops:
+            findings.append(F("telemetry", f"HOOK-LOG.jsonl: {len(launches)} lanzamiento(s) y ninguna "
+                                           "fila `stop` — el hook de SubagentStop no está corriendo",
                               "manual",
-                              "re-montá con `kuraka-mount.py --update` (hook de telemetría corregido) "
-                              "y verificá que la próxima fila traiga tokens"))
+                              "reiniciá Claude Code en el proyecto (los hooks se leen al abrir la sesión); "
+                              "si sigue igual, `kuraka-mount.py --update`"))
+        elif len(stops) >= 3 and all(r.get("total_tokens") is None for r in stops):
+            findings.append(F("telemetry", f"HOOK-LOG.jsonl: {len(stops)} fila(s) `stop` sin tokens — el "
+                                           "hook no pudo leer el transcript del subagente",
+                              "manual",
+                              "revisá que `agent_transcript_path` exista en el payload de SubagentStop "
+                              "(versión de Claude Code) y avisá en el vault"))
 
     # Gate commands left as placeholders: the gate hook ignores them, so the
     # project runs with NO gate (azure FD-5/FD-17).

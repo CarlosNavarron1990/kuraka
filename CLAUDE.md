@@ -121,6 +121,22 @@ python3 kuraka-restore.py [project_root] --overrides-only  # only re-apply overr
 python3 kuraka-ajuste.py add <root> --req REQ --tipo falto-preguntar --debio "1 po-analyst" --texto "..."
 python3 kuraka-ajuste.py ronda|resolver|aceptar|cerrar|estado <root> --req REQ [...]
 
+# Phase 0 — environment preflight (0 tokens), run before the first agent. Checks git
+# state, that the config's gate commands are real and runnable, .env vs .env.example,
+# dependencies, docker + compose ports, alembic heads, and (--tests) the test BASELINE.
+# With --req it writes checkpoints/PREFLIGHT-<REQ>.json — the cycle's open marker
+# (started_at, mode, size) that kuraka-close uses to window the HOOK-LOG. Exit 1 = blocker.
+python3 kuraka-preflight.py <root> --req REQ --mode normal --size M --tests
+python3 kuraka-preflight.py <root>                      # ad-hoc, writes nothing
+
+# Close the cycle — ONE gate (Phase 7's last step): RETRO verdict, user acceptance,
+# locked tests intact, telemetry reconciled against HOOK-LOG.jsonl (derived from it
+# if the curated JSON was never written), then kuraka-backup. A cycle that will not
+# be finished is closed too (`verdict: ABANDONED` + reason), never left open.
+python3 kuraka-close.py <root> --req REQ [--sin-aceptacion "motivo"]
+python3 kuraka-close.py <root> --req REQ --abandonar --motivo "..."
+python3 kuraka-close.py <root> --list
+
 # Spec-first tests (Phase 3.95): lock the acceptance tests written RED from the
 # plan's oracles; verify fails on any locked test changed without a user unlock.
 python3 kuraka-testlock.py lock <root> --req REQ <test files...>
@@ -142,7 +158,11 @@ The framework suite is versioned: `SUITE-VERSION` (single line, semver) +
 `SUITE-CHANGELOG.md` (scheme + per-version results). Every mount stamps
 `suite_version` into the consumer's `.claude/.kuraka-mount-manifest.json`, and
 `archive_cycles` copies it into each archived cycle's `meta.yaml` — so retros can
-be grouped per suite version to compare rework across versions.
+be grouped per suite version to compare rework across versions. The same
+`meta.yaml` carries the numbers to compare BY: `mode`, `size`, `invocaciones`,
+`retrabajo`, `tokens_total` (`kuraka_common.cycle_metrics`, derived from the
+cycle's telemetry on every backup — never hand-typed), plus `aceptacion` /
+`ajustes_*` from Phase 6.9.
 
 `/kuraka-harvest` (vault-only command, `commands/kuraka-harvest.md`, symlinked into
 `.claude/commands/` so it's invocable here; in `EXPORT_SKIP`) is the improvement
@@ -330,6 +350,15 @@ the hook payload's `session_id`; Codex with the helper bundled in
 gets its `scripts/` bundle) is declared in `kuraka_common.SKILL_PLATFORMS` /
 `SKILL_ASSET_PLATFORMS` — the registry the mount and the manifest both read.
 Cursor and Antigravity get neither mechanism, so they do not receive the mode.
+
+**Telemetry is read at SubagentStop, not at launch.** Claude Code launches
+subagents in the background: the `PostToolUse` response is an `async_launched`
+ack with NO usage. `telemetry_append.py` therefore writes a `launch` row there
+and the cost in a `stop` row at `SubagentStop`, computed from
+`agent_transcript_path` (fixtures in `tests-vault/fixtures/` are real captured
+payloads — re-capture them if a Claude Code release changes the shape; reading
+tokens at launch logged 869/869 null rows across 9 projects and was "fixed"
+twice by guessing key names). `kuraka_common.hook_runs` collapses the rows.
 
 **Hooks (`hooks/`, Claude-only) + discipline blocks (`discipline/`).** Seven
 deterministic enforcement hooks (telemetry completeness, gate integrity T7,

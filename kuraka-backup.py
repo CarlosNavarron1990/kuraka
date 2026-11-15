@@ -276,7 +276,8 @@ def _main() -> int:
     if latest:
         to_check.add(latest)
     no_verdict = sorted(r for r in to_check if 'verdict: ""' in _meta(r))
-    no_telem = sorted(r for r in to_check if "has_telemetry: false" in _meta(r))
+    no_telem = sorted(r for r in to_check if "has_telemetry: false" in _meta(r)
+                      and f'verdict: "{kc.ABANDONED}"' not in _meta(r))
     if no_telem:
         err(f"⚠️  {len(no_telem)} ciclo(s) archivados SIN telemetría: "
             f"{', '.join(no_telem[:3])}"
