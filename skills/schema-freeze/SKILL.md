@@ -104,6 +104,13 @@ For EVERY foreign key:
 
 ### 7. Output: frozen schema document
 
+Contract only — decisions, signatures, fields, HTTP contract + error map,
+invariants. No function bodies, no test code; a code block only when the bytes
+are the contract (template, DDL, payload), once. Line budget by cycle size:
+S ≤150 · M ≤400 · L ≤700. Differences from the stories go in a `## Supersedes`
+table (`artifact § · was · frozen as`) — the freeze wins; no upstream re-run
+for wording. See `architect-reviewer` §Schema Freeze Process.
+
 ```markdown
 # Schema Freeze — {ticket}
 

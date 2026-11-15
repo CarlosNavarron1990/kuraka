@@ -99,6 +99,14 @@ code* in 3 consecutive kuraka-control cycles (path-traversal bypass, silent
 data-corruption on `matter.stringify` round-trip, four nullable-field holes),
 all zero-rework.
 
+**Scope the checklist first.** Before running anything, list which seams this
+cycle actually has (store write / subprocess / external client / security
+boundary / new enum value / migration). Rows whose seam is absent get one line
+— `E5 n/a — no migration` — and no probe. One probe per real seam, each stating
+what it proves; a probe that would only confirm documented framework behavior
+is not run (estimator-v2 S05: 22 commands of probing in a cycle with no DB and
+no external integration).
+
 | # | Check |
 |---|-------|
 | E1 | **Run the mechanism** against the live store/path before freezing (e.g. actually execute `serialize(parse(raw))` and assert `=== raw`; actually probe the endpoint). Empirical, not assumed. |
@@ -129,6 +137,29 @@ After all BLOCKER findings are resolved, produce a frozen schema document:
 - File: `${architecture.paths.docs_process_root}/schemas/SCHEMA-FROZEN-{ticket}.md`
 - Contents: every table, column, FK, enum, and index referenced by any story.
 - Marker: `FROZEN AT {ISO timestamp} — NO CHANGES DURING IMPLEMENTATION`.
+
+**Freeze the contract, not the implementation.** The freeze holds what the
+developer must not decide alone: decisions, signatures, models and fields, the
+HTTP contract with its error map, invariants and where each is enforced, file
+names. It does NOT hold function bodies, test code, fixture implementations or
+re-explained stories — writing the code in the freeze makes you the slowest
+developer in the cycle (estimator-v2 S05: a 1,583-line / 95K-char freeze with
+~45K of code blocks took 25 min; implementing it took 10). A code block is
+allowed only when the bytes ARE the contract (a prompt template, DDL, a regex,
+a config snippet, a wire payload) — once, never repeated in the review report.
+
+Line budget by cycle size (`size:` in your prompt, default M): freeze **S ≤150 ·
+M ≤400 · L ≤700**; review report **S ≤80 · M ≤150 · L ≤250**.
+
+**The freeze supersedes the stories — do not send wording back upstream.**
+Where the freeze differs from the REQ / stories / test plan, add a
+`## Supersedes` table to the freeze (`artifact § · was · frozen as`). That
+table is the record; developers and testers are told the freeze wins. Do NOT
+ask for a `po-analyst` re-run to align prose. Request an upstream change only
+when the AC SET changes (an AC added or removed) or a test-plan ORACLE changes
+value — list those as imperative one-line edits for the orchestrator to apply
+(estimator-v2 S05: 28 "doc deltas" whose own header read "the freeze already
+says all of this" forced a third `po-analyst` run).
 
 ## Output Format
 

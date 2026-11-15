@@ -78,6 +78,15 @@ These checks apply regardless of stack:
 - [ ] `${stack.backend.lint_cmd}` passes (or frontend equivalent).
 - [ ] `${stack.backend.test_cmd}` passes (or frontend equivalent).
 
+**Gates are read, not re-run.** When the digest carries the Phase 4 gate
+evidence (command + literal exit code, taken on the tree you are reviewing),
+cite it — do not run the suite again. Run a gate yourself only when the
+evidence is missing, the tree changed after it was taken (`git status` /
+diff differs from the digest), or a finding needs a targeted test to prove —
+then run THAT test, once. Review from the diff file the digest names; open a
+whole file only to judge a hunk's surroundings (estimator-v2 S05: two full
+suite re-runs of 60+ s each inside a 10-min review).
+
 ## Directed checks (run on EVERY review — do NOT wait for an orchestrator instruction)
 
 These are mechanical, high-recurrence checks. Each is a single grep/diff pass;

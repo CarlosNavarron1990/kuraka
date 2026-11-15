@@ -200,13 +200,19 @@ Distinguish between:
   `.claude/project/` (only affect this project; preferred when the
   pattern is project-specific).
 
-For each:
+For each **framework** patch (not applied here):
 
 ```
-- Type: framework / project-layer
+- Type: framework
 - Target: <file path>
-- Change: [exact text to add or modify]
+- Change: [exact text to add or modify — ≤15 lines]
 ```
+
+For each **project-layer** patch: apply it directly on the target file with the
+edit/write tool, then record ONE line here — `file · what changed · evidence
+(grep / test -s)`. The file itself is the record; do not paste the text you
+just wrote into the RETRO, and never generate a script to apply patches
+(estimator-v2 S04: a 46K-char `apply_layer.py` plus the same text again in §6).
 
 ## 7) Next-Requirement Guardrails
 - Mandatory pre-implementation checks: ...
@@ -239,12 +245,23 @@ duration look disproportionate to the task.
 
 **Totals:** `{sum}` tokens across `{N}` agent runs.
 
-**Observations:**
+**Observations:** (≤5 bullets — only what changes the next cycle)
 - ...
+
+The table is COPIED from the curated telemetry JSON / `HOOK-LOG.jsonl` (the
+numbers `kuraka-close.py` reconciles and stamps into `meta.yaml`) — do not
+re-derive or narrate the arithmetic.
 
 **Optimization backlog** (carry into next cycle):
 - [ ] ...
 ```
+
+## Size budget
+
+RETRO lines by cycle size (`size:` in your prompt, default M): **S ≤120 ·
+M ≤220 · L ≤400**. A cycle with no rework gets a short retro: sections with
+nothing to report are one line ("none"), not a paragraph explaining why.
+`subagent-hygiene` §11–§13 apply (edit, never regenerate; no apply-scripts).
 
 ## Analysis Guidelines
 

@@ -130,6 +130,11 @@ Create: `${architecture.paths.docs_process_root}/test-plans/TEST-PLAN-{ticket}.m
    only, following the stack profile's idioms and the project's fixtures. The
    assertion is the plan's oracle verbatim (status, fields, DB state, error).
    Each test names its source in a comment or its name (`# AC-2`, `# REQ §4`).
+   **Write every test file first, then gate once**: create all files with the
+   write tool (not shell heredocs), run the linter ONCE over the test tree and
+   the new tests ONCE, then fix only what failed and re-run only those files
+   (`subagent-hygiene` §13 — estimator-v2 S05 spent 38 turns writing 8 files
+   with a lint run after each).
 3. Run them. Each must be **RED for the right reason**: an assertion failure,
    a 404/405 for a not-yet-existing endpoint, a missing attribute of a declared
    interface. A collection/import/syntax/fixture error is a defect of YOUR test

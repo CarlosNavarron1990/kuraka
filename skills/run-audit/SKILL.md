@@ -101,7 +101,14 @@ For each agent / file that needs updating, specify:
 - Type: framework patch (affects all consumers) OR project-layer addition
   (affects only this project).
 - Exact file path.
-- Exact text to add (not vague suggestions).
+- Exact text to add (not vague suggestions) — for FRAMEWORK patches only, ≤15
+  lines each. A PROJECT-LAYER patch is applied on its file with the edit/write
+  tool and recorded in the RETRO as one line (`file · what changed · evidence`);
+  the text is not pasted twice and no apply-script is generated.
+
+RETRO budget by cycle size (`size:` in the prompt, default M): S ≤120 · M ≤220
+· L ≤400 lines. The telemetry table is copied from the curated JSON /
+`kuraka-close.py`, not re-derived.
 
 ### 7. Produce RETRO document
 

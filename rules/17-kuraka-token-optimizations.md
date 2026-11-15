@@ -502,6 +502,15 @@ artifact también escala: un delta sobre un archivo de stories enorme paga la
 lectura del archivo entero — una story nueva va en su propio archivo
 (editorial F-17).
 
+**T10.d — un delta TEXTUAL sobre `docs/` no lleva agente.** Registrar las
+respuestas del usuario, renombrar un campo, corregir un valor en una AC o un
+oráculo, alinear una story con el freeze: lo aplica el orquestador con la
+herramienta de edición (`docs/` es suyo), a ~0 tokens. El tier T10-S queda para
+deltas que requieren juicio del agente sobre su propio artefacto. Nunca se
+"aplica" un delta generando un script con el texto embebido ni reescribiendo el
+archivo entero (estimator-v2 S05: 11 min y un script de 94K caracteres para
+registrar 20 respuestas; 7 min para 28 correcciones de redacción).
+
 **Estimación de ahorro**: 100–140K tokens por re-run de fase.
 
 ---

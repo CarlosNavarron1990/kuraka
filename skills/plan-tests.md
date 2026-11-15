@@ -82,6 +82,11 @@ the test is sensitive, not that the expectation is right).
   RED before any code (Phase 3.95, `test-engineer` TEST_FIRST) and locked.
   `INTERNAL` = helpers whose interface does not exist yet → written after
   implementation (Phase 6), still with a sourced expectation + mutation proof.
+- **Size:** `ACCEPTANCE` rows carry the full oracle. `INTERNAL` rows are one
+  line (`function · behavior · source`, Input/Expected = `—`): their concrete
+  inputs are written in Phase 6 against the real interface. Plan budget by
+  cycle size: S ≤80 · M ≤200 · L ≤350 lines; ≤3 acceptance cases per AC unless
+  the AC itself enumerates more.
 - **A case without a sourced expected value is incomplete.** If the spec does
   not determine the value (which status? rounding? what if empty?), it is an
   open question for the user (GATE0), never a guess and never "whatever the
@@ -185,8 +190,8 @@ Create a test plan file at:
    rule is untestable, flag it.
 3. **Prefer injectable dependencies** — flag any story that implies tight
    coupling.
-4. **Happy + Error + Edge for every public function** — minimum 3 test
-   cases per function.
+4. **Happy + Error + Edge for every public function** — 3 cases per function
+   is the floor AND the default; add more only for a rule the AC enumerates.
 5. **The developer reads this plan** — write it as a contract, not a
    suggestion.
 6. **Every case has an oracle with a source** (step 3). No source → open

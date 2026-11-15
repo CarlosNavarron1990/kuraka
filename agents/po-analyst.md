@@ -199,6 +199,21 @@ less.
 A BLOCKER stops the whole combined run — do not produce stories or a test plan
 against a requirement with an unresolved blocker.
 
+**Ask before you write (question pass).** A question is BLOCKING — whatever
+you call it — when its answer changes a contract, a story's AC, or a test
+oracle. With ≥1 blocking question the run ENDS after a short question pass:
+write only the REQ's `## 1. Requirement Summary`, `## 2. Scope` and
+`## 9. Open Questions`, and return. No stories, no test plan, no endpoint or
+file tables. The orchestrator asks the user and launches the full COMBINED run
+with the answers in its prompt — you then write every document ONCE.
+(estimator-v2 S05: REQ + 3 stories + a 188-row test plan were written on top
+of 20 open questions, 9 of them blocking; recording the answers afterwards
+cost two more runs, 18 min.) Open questions are a table, one row each —
+`id · question · options · recommended · blocks (contract/AC/oracle/none)` —
+never a prose subsection per question. If your prompt already carries the
+user's answers, record them verbatim in `## 1b. Resolved clarifications` and
+do not re-ask. A question-pass report still ends with its `## Confidence` line.
+
 **Escalate instead of guessing**: if decomposition reveals ≥4 stories, or a
 schema/contract decision the REQ cannot settle, STOP after the REQ and say so.
 The orchestrator will run phases 2 and 2.5 as separate agents. A COMBINED run
@@ -206,6 +221,28 @@ that quietly under-specifies stories to fit one pass costs more than the split
 it avoided.
 
 **Single gate**: the user approves REQ + stories + test plan together.
+
+## Size budgets (your wall-clock is your output — `subagent-hygiene` §12)
+
+`size:` comes in your prompt (default M). Lines per document:
+
+| Document | S | M | L |
+|----------|---|---|---|
+| REQ | ≤120 | ≤300 | ≤500 |
+| each story | ≤60 | ≤120 | ≤180 |
+| test plan | ≤80 | ≤200 | ≤350 |
+
+- **One owner per fact.** Endpoint contracts and file lists live in the
+  stories; the REQ's §4/§5 are one row per endpoint/file pointing at the story
+  (`→ S2 §API`), not a second copy. A coverage table is one row per requirement
+  item (`item → story → AC`), no prose.
+- **Test plan:** `ACCEPTANCE` rows carry the full oracle (input → expected →
+  source). `INTERNAL` rows are one line — `function · behavior · source` — the
+  concrete inputs are written in Phase 6 against the real interface. Aim at
+  ≤3 acceptance cases per AC (happy / error / edge); more only for a rule the
+  AC itself enumerates.
+- These rules also apply to you: `.claude/agents/contexts/subagent-hygiene.md`
+  §11–§13 (edit, never regenerate; batch, then gate once).
 
 ## Rules
 

@@ -380,6 +380,22 @@ greenfield project with a plan starts each cycle from the prompt of its next
   (≈13 runtime iterations, one near-revert, duplicate migration work)
   was caused by fragmented scope + reversible decisions without a
   recorded value test. See `docs/process/IMPROVEMENTS-DD-1031.md`.
+- **Questions first, documents once (HARD).** When `po-analyst` returns a
+  question pass (≥1 question that changes a contract, an AC or an oracle — its
+  REQ then has only Summary, Scope and Open Questions), ask the user with
+  `AskUserQuestion` and launch the full COMBINED run as a NEW agent with the
+  answers pasted verbatim in the prompt. Never let stories or a test plan be
+  written on top of unanswered blocking questions, and never "fill the answers
+  in" afterwards with another agent run.
+- **Recording answers and textual corrections is YOUR job, with edits.** An
+  answer or correction that only changes text in `docs/` (a resolved question,
+  a renamed field, a value in an AC or oracle, the architect's `## Supersedes`
+  rows that touch an AC set or an oracle) is applied by the orchestrator with
+  the edit tool — `docs/` is yours to edit (§Orchestrator constraint) — at ~0
+  tokens and seconds. Launch an agent for a delta only when it is GENERATIVE
+  (a new story, new cases, a contract to design): `rules/17` T10.b/T10.d.
+  (estimator-v2 S05: two `po-analyst` delta runs, 11 + 7 min, to record 20
+  answers and 28 wording corrections.)
 - **GATE1 PRECONDITION (HARD):** the per-Agent telemetry JSON file for this
   REQ must exist and be appended after every Agent invocation. If it does
   not exist by Gate1, create or repair it from available evidence, recording unknown values as null. If that cannot be done, stop and explain the blocker. Telemetry is not optional —
@@ -415,6 +431,11 @@ omission and its trigger-absence in the Workflow Status, never silently.
 - Validates stories and test plan; freezes schema before implementation.
 - Output: report with verdict + `${architecture.paths.docs_process_root}/schemas/SCHEMA-FROZEN-{ticket}.md`
 - Gate: all BLOCKERs resolved + schema frozen.
+- **The freeze wins.** Where SCHEMA-FROZEN differs from the REQ / stories /
+  test plan, its `## Supersedes` table is the record and every later prompt
+  says so ("the freeze supersedes the story text"). Do not re-run `po-analyst`
+  to align wording; apply by edit only the rows that add/remove an AC or change
+  an oracle's value (the 3.95 tests are written from the plan).
 
 ### Phase 3.9 — Environment pre-flight (orchestrator, deterministic, ~0 tokens)
 
@@ -909,6 +930,17 @@ errors and broken telemetry.
   for a reason.
 - **Continuous execution:** Once the user has authorized the scope and mode, advance through passing gates without requesting further approval. Record each gate, checkpoint, and evidence; report progress without ending the turn. Pause only for unresolved material decisions, failed gates that cannot be remedied, explicit user pauses, or actions requiring separate authorization. Never waive a failed gate silently.
 - **Schema freeze before Phase 4** — no DB changes during implementation.
+- **Every agent prompt states `size: S|M|L`** (the cycle's size, the one given
+  to `kuraka-preflight.py`). The agents' document budgets hang on it
+  (`subagent-hygiene` §12); without it they assume M.
+- **Reasoning effort follows the size** (Claude Code ≥ 2.1.292: the Agent call
+  takes an `effort` parameter; other platforms ignore this line). For `S` and
+  `M` cycles launch `po-analyst`, `architect-reviewer`, `code-reviewer` and
+  `final-auditor` with `effort: medium`. Keep the session default for `L`
+  cycles, for any cycle with a security / money / data-migration /
+  external-contract seam, and for the re-run of a gate that already produced
+  rework in this cycle. (Measured on estimator-v2: about half of what the gate
+  agents generate is reasoning, and generation is ~90% of their wall-clock.)
 - **Refresh stale stories** if the user makes corrections between phases.
 - **One story at a time in Phase 4** — baby steps.
 - **Token optimization**: apply `rules/17-kuraka-token-optimizations.md`

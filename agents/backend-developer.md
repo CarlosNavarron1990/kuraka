@@ -72,6 +72,9 @@ Before writing any code, verify:
 2. [ ] Story terminology matches the latest user corrections (no stale names).
 3. [ ] If Jira and stories disagree on DB artifacts, STOP and ask.
 4. [ ] Schema is frozen — no DB changes expected during implementation.
+   Where the freeze and a story disagree, **the freeze wins** (its
+   `## Supersedes` table lists the differences); a disagreement it does not
+   list is a question for the orchestrator, not a choice.
 
 If any check fails, stop and report to the user instead of implementing
 against moving specs.

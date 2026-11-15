@@ -44,3 +44,21 @@ exists because a cycle broke without it (origins in parentheses).
 10. **One test runner per host.** Do not start a suite / mutation / E2E run
     while another is running on the same host; a gate read under that load is
     void. See `rules/17` T7 (one runner per host).
+11. **Change text with an edit, never with a generator.** To change lines of an
+    existing file use the edit tool (or one targeted replacement). Never
+    regenerate the whole file to change a few lines, and never write a script
+    that embeds the document's text to "apply" it — the script IS the rewrite,
+    paid twice (estimator-v2 S04/S05: three agents wrote 46K–94K-char
+    `apply_*.py` scripts to fill in answers or apply patches; one took 11 min
+    to record 20 user answers).
+12. **Your wall-clock is your output.** Measured: tool time is under 10% of a
+    run; the rest is text you generate, ~100 tokens/s. Every document has a
+    line budget set by the cycle size (`size:` in your prompt; your agent
+    definition has the numbers) — say a thing once, in the artifact that owns
+    it, and reference it by `§` elsewhere. Over budget = cut repetition, not
+    rigour; if the content genuinely does not fit, say so in the report instead
+    of silently exceeding it.
+13. **Write in batches, gate once.** Create all the files of a batch first, then
+    run lint + tests ONCE, then fix only what failed. Do not run the linter
+    after each file, and do not write files through shell heredocs when a
+    write tool exists (estimator-v2 S05: 38 turns to write 8 test files).

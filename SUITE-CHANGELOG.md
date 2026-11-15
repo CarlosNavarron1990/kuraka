@@ -27,6 +27,35 @@ que con la N = la integración funcionó.
 
 ## Sin publicar (pendiente de bump por `/kuraka-harvest`)
 
+### Tiempo de ciclo — los agentes de juicio escriben menos (2026-11-14)
+
+Origen: medición turno por turno de estimator-v2 S04/S05. El tiempo de un ciclo
+es texto generado (herramientas <10%): en S05 la planificación fue el 51% de
+116 min, con 2.741 líneas de documentos para 2.347 de código. Estimación (no
+medida aún): planificación de 59 a ~25 min en un ciclo M.
+
+- **po-analyst**: pasada de preguntas — con ≥1 pregunta que cambie contrato/AC/
+  oráculo termina tras Summary + Scope + Open Questions y los documentos se
+  escriben UNA vez con las respuestas; presupuesto de líneas por tamaño (REQ,
+  story, test plan); un dueño por dato; casos INTERNAL de una línea.
+- **architect-reviewer / schema-freeze**: el freeze congela contratos, no
+  implementación (sin cuerpos de función ni código de tests); presupuesto de
+  líneas; tabla `## Supersedes` en vez de devolver correcciones de redacción a
+  po-analyst; checklist empírico acotado a los seams que existen.
+- **final-auditor / run-audit**: parches de capa aplicados con edición directa
+  y una línea en el RETRO; telemetría copiada, no re-derivada; presupuesto.
+- **code-reviewer**: los gates de la fase 4 se citan, no se re-ejecutan.
+- **test-engineer (3.95)**: escribir todos los archivos y correr lint/tests una vez.
+- **subagent-hygiene §11–§13** (todos): editar en vez de regenerar o generar
+  scripts de aplicación; el tiempo es la salida; lotes y un solo gate.
+- **Orquestador** (`skills/kuraka.md`, `rules/17` T10.d): preguntas primero;
+  respuestas y deltas textuales sobre `docs/` los aplica él con ediciones;
+  el freeze gana; `size:` en todo prompt; `effort: medium` para los agentes de
+  juicio en ciclos S/M sin seam de riesgo.
+- **A medir en el próximo harvest**: minutos y tokens de salida por agente en
+  ciclos M posteriores vs S05; retrabajo en fase 5 (riesgo: un freeze más corto
+  o esfuerzo medio que deje pasar defectos).
+
 Origen: análisis de los 294 ciclos archivados (2026-11-14). Tres huecos sin dueño
 determinístico; los tres se cubren con scripts, sin tocar agentes.
 
