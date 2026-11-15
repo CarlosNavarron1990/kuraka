@@ -137,7 +137,9 @@ def open_cycles(vault: Path, project: Path, slug: str, docs_root: str,
             ts = datetime.strptime(m.group(1), "%Y%m%d").timestamp() if m else f.stat().st_mtime
         except (ValueError, OSError):
             continue
-        if now - ts >= min_age_h * 3600:
+        # min_age_h <= 0 = "every open cycle": a REQ stamped with the UTC date is
+        # "tomorrow" for a few hours in UTC-5 and would otherwise vanish from --list.
+        if min_age_h <= 0 or now - ts >= min_age_h * 3600:
             out.append(stem)
     return out
 

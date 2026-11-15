@@ -112,6 +112,33 @@ def test_stop_without_a_readable_transcript_stays_null_not_zero(tmp_path):
     assert _log(proj)[0]["total_tokens"] is None
 
 
+def test_ghost_stop_of_the_harness_helper_is_not_logged(tmp_path):
+    """Observed live (estimator-v2, possuite): ~6 s after every launch a second
+    SubagentStop arrives with another agent_id, no agent_type and a transcript
+    path that never exists. It is not a subagent of the cycle."""
+    proj = _proj(tmp_path)
+    p = json.loads((FX / "hook-subagentstop.json").read_text())
+    p.pop("agent_type", None)
+    p["agent_id"] = "a837392c87b6daeae"
+    p["agent_transcript_path"] = str(tmp_path / "subagents" / "agent-a837392c87b6daeae.jsonl")
+    assert _hook(p, proj).returncode == 0
+    assert _log(proj) == []
+
+
+def test_hook_runs_drops_ghost_stops_already_in_the_log():
+    rows = [
+        {"ts": "2026-11-15T04:25:22+00:00", "event": "launch", "agent": "backend-developer", "agent_id": "a1"},
+        {"ts": "2026-11-15T04:25:33+00:00", "event": "stop", "agent": None, "agent_id": "ghost",
+         "total_tokens": None, "partial": True},
+        {"ts": "2026-11-15T04:25:49+00:00", "event": "stop", "agent": "backend-developer", "agent_id": "a1",
+         "total_tokens": 74602},
+        {"ts": "2026-11-15T04:26:52+00:00", "event": "launch", "agent": "code-reviewer", "agent_id": "a2"},
+    ]
+    runs = kc.hook_runs(rows)
+    assert [r["agent_id"] for r in runs] == ["a1", "a2"]
+    assert runs[0]["total_tokens"] == 74602 and runs[1]["lost"] is True
+
+
 def test_transcript_usage_dedups_blocks_of_one_api_message(tmp_path):
     u1 = {"input_tokens": 10, "cache_read_input_tokens": 1000, "cache_creation_input_tokens": 0, "output_tokens": 50}
     u2 = {"input_tokens": 5, "cache_read_input_tokens": 2000, "cache_creation_input_tokens": 100, "output_tokens": 70}

@@ -1614,6 +1614,11 @@ def hook_runs(rows: list[dict], since: "str | None" = None,
                 cur["stop_ts"] = r.get("ts")
         else:
             out.append({**r, "lost": False})
+    # A stop with no launch, no agent name and no cost is the harness's internal
+    # helper (see telemetry_append.py), not a run of the cycle.
+    out = [r for r in out if not (r.get("agent_id") and not r.get("agent")
+                                  and r.get("total_tokens") is None
+                                  and r.get("stop_ts") and not r.get("lost"))]
     return [r for r in out if inside(r)]
 
 

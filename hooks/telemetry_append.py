@@ -274,6 +274,14 @@ def main() -> int:
         for bt in data.get("background_tasks") or []:
             if isinstance(bt, dict) and bt.get("id") == agent_id and bt.get("description"):
                 desc = bt["description"]
+        if (not data.get("agent_type") and not meta.get("agentType")
+                and usage.get("total_tokens") is None
+                and not (tpath and Path(str(tpath)).exists())):
+            # Claude Code fires a second SubagentStop a few seconds after every
+            # launch for an internal helper: another agent_id, no agent_type, no
+            # transcript on disk. It is not a subagent of the cycle — logging it
+            # doubled the invocation count (estimator-v2: 8 real runs, 16 rows).
+            return 0
         seq = _prior_stops(log, agent_id) + 1
         entry = {
             "ts": now, "source": "hook", "event": "stop",
